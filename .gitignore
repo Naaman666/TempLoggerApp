@@ -1,0 +1,38 @@
+# ---- Python általános ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtuális környezetek
+.venv/
+venv/
+env/
+
+# IDE / szerkesztő fájlok
+.vscode/
+.idea/
+*.swp
+
+# ---- OS specifikus ----
+.DS_Store
+Thumbs.db
+
+# ---- Projekt specifikus ----
+# Mérési és export fájlok
+*.log
+*.csv
+*.xlsx
+*.json
+*.png
+*.pdf
+
+# Kimeneti mappák
+TestResults/
+SensorConfigs/
+
+# PyInstaller / build kimenetek
+build/
+dist/
+*.spec
