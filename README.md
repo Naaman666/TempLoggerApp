@@ -21,8 +21,8 @@ This Python application logs temperature data from DS18B20 sensors connected to 
 ## Installation
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
-   cd <repository-folder>
+   git clone https://github.com/Naaman666/TempLoggerApp.git
+   cd TempLoggerApp
    ```
 2. Install required Python libraries:
    ```bash
