@@ -360,7 +360,14 @@ class TempLoggerApp:
         self.generate_output_var: tk.BooleanVar = None  # Initialized in GUI
 
         # Load default config
-        self.load_default_config()
+        try:
+            self.load_default_config()
+        except Exception as e:
+            if hasattr(self, 'log_display'):
+                self.log_display.insert(tk.END, f"Warning: Failed to load config.json: {str(e)}\n")
+            else:
+                print(f"Warning: Failed to load config.json: {str(e)}")
+
 
         # Initialize components
         self.export_manager = ExportManager()
