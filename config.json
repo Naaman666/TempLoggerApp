@@ -1,22 +1,9 @@
 {
-    // Default interval (in seconds) for logging sensor data to file (Must be a positive integer).
     "default_log_interval": 10,
-
-    // Default interval (in seconds) for updating the GUI display (Must be a positive integer).
     "default_view_interval": 3,
-
-    // Default temperature threshold (in Celsius) to start measurement (Must be a float within sensor range).
     "default_start_threshold": 22.0,
-
-    // Default temperature threshold (in Celsius) to stop measurement (Must be a float greater than start_threshold).
     "default_stop_threshold": 30.0,
-
-    // Maximum number of lines to display in the GUI log window to prevent slowdown (Must be a positive integer).
     "max_log_lines": 500,
-
-    // Folder where measurement logs and exports (CSV, Excel, JSON, PNG, PDF) are saved (Must be a valid directory name).
     "measurement_folder": "TestResults",
-
-    // Folder where sensor configuration files are stored (Must be a valid directory name).
     "config_folder": "SensorConfigs"
 }
