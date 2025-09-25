@@ -60,7 +60,7 @@ class GUIBuilder:
 
     def init_gui(self):
         """Initialize the GUI elements."""
-        self.root.title("Temperature Logger - DeepSeek v5")
+        self.root.title("Temperature Logger")
         self.root.geometry("1400x730")
         self.root.protocol("WM_DELETE_WINDOW", self.app.on_closing)
 
