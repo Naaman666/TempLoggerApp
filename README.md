@@ -31,7 +31,7 @@ This Python application logs temperature data from DS18B20 sensors connected to 
 3. Ensure DS18B20 sensors are connected and the `w1-gpio` and `w1-therm` kernel modules are enabled on the Raspberry Pi.
 
 ## Usage
-1. Run the application:
+1. Run the application (in TempLoggerApp dir):
    ```bash
    python TempLoggerApp.py
    ```
