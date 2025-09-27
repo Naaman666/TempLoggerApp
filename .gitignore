@@ -1,62 +1,64 @@
 # ==============================================
-# Temperature Logger App - Git Ignore Rules
+# Temperature Logger App - Git Ignore
+# MINDEN futáshoz szükséges fájl felkerül!
 # ==============================================
 
-# Hogy a mappákat is feltöltse
-!.gitkeep
-
-# ---- Python általános ----
+# ---- Python bytecode és cache ----
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.so
+.python-version
 
-# Virtuális környezetek
+# ---- Virtuális környezetek ----
 .venv/
 venv/
 env/
+ENV/
 
-# IDE / szerkesztő fájlok
+# ---- IDE és szerkesztő fájlok ----
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
-# ---- OS specifikus ----
+# ---- Operációs rendszer rejtett fájlok ----
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# ==============================================
-# PROJEKT SPECIFIKUS - NE TÖLTSD FEL!
-# ==============================================
-
-# ❌ Mérési számláló - NE töltsd fel!
-config/counter.json
-
-# ❌ Mérési adatok - NE töltsd fel!
-TestResults/
-TestResults/*
-
-# ❌ Felhasználói konfigurációk - NE töltsd fel!
-SensorConfigs/
-SensorConfigs/*
-
-# ❌ Egyéb generált fájlok - NE töltsd fel!
-*.log
-*.csv
-*.xlsx
-*.json
-*.png
-*.pdf
-
-# ==============================================
-# PYINSTALLER / BUILD
-# ==============================================
+# ---- PyInstaller és build fájlok ----
 build/
 dist/
 *.spec
+*.egg-info/
 
 # ==============================================
-# MINDEN MÁS TÖLTSÖN FEL AUTOMATIKUSAN!
+# ❌ CSAK EZEKET NE TÖLTSD FEL (futáshoz NEM kell):
 # ==============================================
+
+# Mérési számláló (program létrehozza)
+config/counter.json
+
+# Mérési eredmények (program generálja)
+TestResults/*.log
+TestResults/*.csv
+TestResults/*.xlsx
+TestResults/*.json
+TestResults/*.png
+TestResults/*.pdf
+TestResults/*/
+
+# Felhasználói konfigurációk (program menti)
+SensorConfigs/*.json
+
+# ==============================================
+# ✅ DE a mappák maguk FELTÖLTHETŐEK!
+# ==============================================
+!.gitkeep
