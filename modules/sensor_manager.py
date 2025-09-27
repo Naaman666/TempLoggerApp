@@ -24,6 +24,8 @@ class SensorManager:
         self.sensor_vars: Dict[str, tk.BooleanVar] = {}
         self.sensor_checkbuttons: Dict[str, ttk.Checkbutton] = {}
         self.sensor_labels: Dict[str, ttk.Label] = {}
+        self.temp_labels: Dict[str, ttk.Label] = {}
+        self.ambient_sensor_id = None
 
     def init_sensors(self):
         """Initialize DS18B20 sensors and update GUI."""
@@ -31,60 +33,172 @@ class SensorManager:
             self.sensors = W1ThermSensor.get_available_sensors()
             self.sensor_ids = [s.id for s in self.sensors]
             
-            # Always show 20 sensor slots
-            max_sensors = 20
-            
             # Clear sensor frame
             for widget in self.app.sensor_frame.winfo_children():
                 widget.destroy()
             self.sensor_vars.clear()
             self.sensor_checkbuttons.clear()
             self.sensor_labels.clear()
+            self.temp_labels.clear()
 
-            # Create 2 columns for sensors
-            for i in range(max_sensors):
-                row = i % 10  # 10 sensors per column
-                col = i // 10  # 0 or 1 for column
+            # Create sensor names with hyphen
+            for i, sensor in enumerate(self.sensors, 1):
+                sensor_id = sensor.id
+                self.sensor_names[sensor_id] = f"Sensor-{i}"
+                
+                # Check if this is sensor 25 (ambient)
+                if i == 25:
+                    self.ambient_sensor_id = sensor_id
+                    self.sensor_names[sensor_id] = "Sensor-25 (Ambient)"
 
-                # Sensor number label
-                sensor_num_label = ttk.Label(self.app.sensor_frame, text=f"{i+1}.")
-                sensor_num_label.grid(row=row, column=col*3, padx=2, pady=1, sticky='W')
-
-                if i < len(self.sensors):
-                    sensor = self.sensors[i]
-                    sensor_id = sensor.id
-                    self.sensor_names[sensor_id] = f"Sensor_{i+1}"
-                    
-                    var = tk.BooleanVar(value=True)
-                    chk = ttk.Checkbutton(self.app.sensor_frame, text=self.sensor_names[sensor_id], variable=var)
-                    chk.grid(row=row, column=col*3+1, padx=2, pady=1, sticky='W')
-                    chk.bind("<Double-Button-1>", lambda e, sid=sensor_id: self.rename_sensor(sid))
-                    
-                    status_label = ttk.Label(self.app.sensor_frame, text="Active", foreground="green")
-                    status_label.grid(row=row, column=col*3+2, padx=5, pady=1, sticky='W')
-                    
-                    self.sensor_vars[sensor_id] = var
-                    self.sensor_checkbuttons[sensor_id] = chk
-                    self.sensor_labels[sensor_id] = status_label
-                else:
-                    # Empty sensor slot
-                    empty_label = ttk.Label(self.app.sensor_frame, text="Empty", foreground="gray")
-                    empty_label.grid(row=row, column=col*3+1, padx=2, pady=1, sticky='W')
-                    
-                    # Placeholder for alignment
-                    placeholder = ttk.Label(self.app.sensor_frame, text="")
-                    placeholder.grid(row=row, column=col*3+2, padx=5, pady=1, sticky='W')
-
+            # Create 3-column layout
+            self._create_sensor_grid()
+            
             self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
 
             if not self.sensors:
                 self.app.log_to_display("WARNING: No DS18B20 sensors found! Showing empty slots.\n")
             else:
-                self.app.log_to_display(f"Found {len(self.sensors)} sensors. {max_sensors} slots available.\n")
+                self.app.log_to_display(f"Found {len(self.sensors)} sensors. 24 slots available.\n")
 
         except Exception as e:
             self.app.log_to_display(f"ERROR: Sensor initialization failed: {str(e)}\n")
             self.app.error_handler("Error", f"Sensor initialization failed: {str(e)}")
+
+    def _create_sensor_grid(self):
+        """Create 3-column sensor grid."""
+        max_sensors = 24
+        
+        # Ambient sensor at top
+        if self.ambient_sensor_id:
+            self._create_sensor_row(self.ambient_sensor_id, 0, 0, is_ambient=True)
+        
+        # Regular sensors in 3 columns
+        row_offset = 1 if self.ambient_sensor_id else 0
+        
+        for i in range(max_sensors):
+            row = (i // 3) + row_offset
+            col = (i % 3) * 3  # 3 columns
+            
+            if i < len(self.sensors) and self.sensors[i].id != self.ambient_sensor_id:
+                sensor_id = self.sensors[i].id
+                self._create_sensor_row(sensor_id, row, col)
+            else:
+                # Empty slot
+                self._create_empty_slot(row, col, i + 1)
+
+    def _create_sensor_row(self, sensor_id: str, row: int, col: int, is_ambient: bool = False):
+        """Create a sensor row with checkbox, name, status and temperature."""
+        sensor_num = int(sensor_id) if sensor_id.isdigit() else 0
+        
+        # Sensor number
+        num_label = ttk.Label(self.app.sensor_frame, text=f"{sensor_num}.")
+        num_label.grid(row=row, column=col, padx=2, pady=1, sticky='W')
+        
+        # Checkbox
+        var = tk.BooleanVar(value=True)
+        chk = ttk.Checkbutton(
+            self.app.sensor_frame, 
+            text=self.sensor_names[sensor_id], 
+            variable=var,
+            command=lambda sid=sensor_id: self._update_sensor_status(sid)
+        )
+        chk.grid(row=row, column=col+1, padx=2, pady=1, sticky='W')
+        
+        # Right-click for rename
+        chk.bind("<Button-3>", lambda e, sid=sensor_id: self.rename_sensor(sid))
+        
+        # Status and temperature label
+        status_temp_label = ttk.Label(
+            self.app.sensor_frame, 
+            text="Active --.--°C", 
+            foreground="green",
+            font=("Arial", 8)
+        )
+        status_temp_label.grid(row=row+1, column=col+1, padx=2, pady=0, sticky='W')
+        
+        # Separator line
+        separator = ttk.Separator(self.app.sensor_frame, orient='horizontal')
+        separator.grid(
+            row=row+2, column=col, columnspan=4, 
+            sticky='ew', padx=2, pady=1
+        )
+        
+        self.sensor_vars[sensor_id] = var
+        self.sensor_checkbuttons[sensor_id] = chk
+        self.temp_labels[sensor_id] = status_temp_label
+        
+        # Tooltip
+        self._create_tooltip(chk, "Right-click to rename sensor")
+
+    def _create_empty_slot(self, row: int, col: int, slot_num: int):
+        """Create an empty sensor slot."""
+        num_label = ttk.Label(self.app.sensor_frame, text=f"{slot_num}.")
+        num_label.grid(row=row, column=col, padx=2, pady=1, sticky='W')
+        
+        empty_label = ttk.Label(self.app.sensor_frame, text="Empty", foreground="gray")
+        empty_label.grid(row=row, column=col+1, padx=2, pady=1, sticky='W')
+        
+        status_label = ttk.Label(self.app.sensor_frame, text="--", foreground="gray", font=("Arial", 8))
+        status_label.grid(row=row+1, column=col+1, padx=2, pady=0, sticky='W')
+        
+        separator = ttk.Separator(self.app.sensor_frame, orient='horizontal')
+        separator.grid(
+            row=row+2, column=col, columnspan=4, 
+            sticky='ew', padx=2, pady=1
+        )
+
+    def _create_tooltip(self, widget: tk.Widget, text: str):
+        """Create a tooltip for a widget."""
+        def enter(event):
+            tooltip = tk.Toplevel(widget)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 20}")
+            label = tk.Label(tooltip, text=text, background="yellow", 
+                           relief="solid", borderwidth=1, padx=5, pady=3)
+            label.pack()
+
+        def leave(event):
+            for child in widget.winfo_children():
+                if isinstance(child, tk.Toplevel):
+                    child.destroy()
+
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
+
+    def _update_sensor_status(self, sensor_id: str):
+        """Update sensor status label when checkbox changes."""
+        if sensor_id in self.temp_labels:
+            is_active = self.sensor_vars[sensor_id].get()
+            status = "Active" if is_active else "Inactive"
+            color = "green" if is_active else "red"
+            
+            # Keep current temperature in label
+            current_text = self.temp_labels[sensor_id].cget("text")
+            temp_part = current_text.split(" ")[-1] if "°C" in current_text else "--.--°C"
+            
+            self.temp_labels[sensor_id].config(
+                text=f"{status} {temp_part}",
+                foreground=color
+            )
+
+    def update_temperature_display(self, temps_dict: Dict[str, Optional[float]]):
+        """Update temperature displays for all sensors."""
+        for sensor_id, temp in temps_dict.items():
+            if sensor_id in self.temp_labels:
+                is_active = self.sensor_vars[sensor_id].get()
+                status = "Active" if is_active else "Inactive"
+                color = "green" if is_active else "red"
+                
+                if temp is not None:
+                    temp_str = f"{temp:.1f}°C"
+                else:
+                    temp_str = "--.--°C"
+                
+                self.temp_labels[sensor_id].config(
+                    text=f"{status} {temp_str}",
+                    foreground=color
+                )
 
     def list_sensors_status(self):
         """Log the status of all sensors."""
@@ -104,12 +218,7 @@ class SensorManager:
 
         for sid, var in self.sensor_vars.items():
             var.set(new_state)
-            # Update status label
-            if sid in self.sensor_labels:
-                self.sensor_labels[sid].config(
-                    text="Active" if new_state else "Inactive",
-                    foreground="green" if new_state else "red"
-                )
+            self._update_sensor_status(sid)
 
         action = "activated" if new_state else "deactivated"
         self.app.log_to_display(f"All sensors {action}\n")
@@ -129,10 +238,12 @@ class SensorManager:
         return temps
 
     def rename_sensor(self, sensor_id: str):
-        """Rename a sensor via double-click on its checkbutton."""
-        new_name = simpledialog.askstring("Rename Sensor", 
-                                         f"Enter new name for {self.sensor_names[sensor_id]}:", 
-                                         initialvalue=self.sensor_names[sensor_id])
+        """Rename a sensor via right-click on its checkbutton."""
+        new_name = simpledialog.askstring(
+            "Rename Sensor", 
+            f"Enter new name for {self.sensor_names[sensor_id]}:", 
+            initialvalue=self.sensor_names[sensor_id]
+        )
         if new_name and new_name.strip():
             self.sensor_names[sensor_id] = sanitize_filename(new_name)
             self.sensor_checkbuttons[sensor_id].config(text=self.sensor_names[sensor_id])
