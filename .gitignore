@@ -1,3 +1,7 @@
+# ==============================================
+# Temperature Logger App - Git Ignore Rules
+# ==============================================
+
 # ---- Python általános ----
 __pycache__/
 *.py[cod]
@@ -14,13 +18,28 @@ env/
 .vscode/
 .idea/
 *.swp
+*.swo
 
 # ---- OS specifikus ----
 .DS_Store
 Thumbs.db
 
-# ---- Projekt specifikus ----
-# Mérési és export fájlok
+# ==============================================
+# PROJEKT SPECIFIKUS - NE TÖLTSD FEL!
+# ==============================================
+
+# ❌ Mérési számláló - NE töltsd fel!
+config/counter.json
+
+# ❌ Mérési adatok - NE töltsd fel!
+TestResults/
+TestResults/*
+
+# ❌ Felhasználói konfigurációk - NE töltsd fel!
+SensorConfigs/
+SensorConfigs/*
+
+# ❌ Egyéb generált fájlok - NE töltsd fel!
 *.log
 *.csv
 *.xlsx
@@ -28,11 +47,13 @@ Thumbs.db
 *.png
 *.pdf
 
-# Kimeneti mappák
-TestResults/
-SensorConfigs/
-
-# PyInstaller / build kimenetek
+# ==============================================
+# PYINSTALLER / BUILD
+# ==============================================
 build/
 dist/
 *.spec
+
+# ==============================================
+# MINDEN MÁS TÖLTSÖN FEL AUTOMATIKUSAN!
+# ==============================================
