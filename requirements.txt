@@ -1,4 +1,0 @@
-pandas
-matplotlib
-w1thermsensor
-openpyxl
