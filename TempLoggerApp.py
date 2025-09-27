@@ -377,6 +377,10 @@ class TempLoggerApp:
             self.error_handler("Warning", "Logging already in progress!")
             return
         
+        # Clear previous data
+        with self.data_processor.lock:
+            self.data_processor.data.clear()
+        
         self.running_event.set()
         self.gui.start_button.config(state="disabled")
         self.gui.stop_button.config(state="normal")
@@ -425,9 +429,13 @@ class TempLoggerApp:
         self.progress_bar.grid_remove()
         self.progress_label.grid_remove()
 
-        # Generate plots if checkbox is checked
+        # Generate plots if checkbox is checked and we have data
         if self.generate_output_var.get():
-            self.data_processor.save_data('plot')
+            if self.data_processor.data:
+                self.data_processor.save_data('plot')
+                self.log_to_display("Plots generated successfully\n")
+            else:
+                self.log_to_display("No data collected, skipping plot generation\n")
 
     def update_progress(self, current_time: float):
         """Update progress bar and label for timed measurements."""
@@ -461,7 +469,7 @@ class TempLoggerApp:
             self.log_timer.start()
 
     def view_update(self):
-        """Update GUI view."""
+        """Update GUI view and collect data."""
         if not self.running_event.is_set():
             return
         current_time = time.time()
@@ -470,12 +478,29 @@ class TempLoggerApp:
         with self.lock:
             temps_dict = self.sensor_manager.read_sensors()
         temps_list = [temps_dict[sid] for sid in self.sensor_manager.sensor_ids]
-        view_line = f"VIEW,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
+        
+        # Convert temperatures to floats and handle None values
+        processed_temps = []
+        for temp in temps_list:
+            if temp is not None:
+                try:
+                    processed_temps.append(float(temp))
+                except (ValueError, TypeError):
+                    processed_temps.append(None)
+            else:
+                processed_temps.append(None)
+        
+        # Create data row and add to data list
+        data_row = ["VIEW", seconds, timestamp] + processed_temps
+        with self.data_processor.lock:
+            self.data_processor.data.append(data_row)
+        
+        view_line = f"VIEW,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in processed_temps])
         self.log_to_display(view_line + "\n")
         self.schedule_view_update()
 
     def log_update(self):
-        """Log to file."""
+        """Log to file and collect data."""
         if not self.running_event.is_set():
             return
         current_time = time.time()
@@ -484,14 +509,35 @@ class TempLoggerApp:
         with self.lock:
             temps_dict = self.sensor_manager.read_sensors()
         temps_list = [temps_dict[sid] for sid in self.sensor_manager.sensor_ids]
+        
+        # Convert temperatures to floats and handle None values
+        processed_temps = []
+        for temp in temps_list:
+            if temp is not None:
+                try:
+                    processed_temps.append(float(temp))
+                except (ValueError, TypeError):
+                    processed_temps.append(None)
+            else:
+                processed_temps.append(None)
+        
+        # Create data row and add to data list
+        data_row = ["LOG", seconds, timestamp] + processed_temps
+        with self.data_processor.lock:
+            self.data_processor.data.append(data_row)
+        
         if self.log_file:
-            log_line = f"LOG,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
+            log_line = f"LOG,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in processed_temps])
             try:
                 self.log_file.write(log_line + "\n")
                 self.log_file.flush()
             except IOError as e:
                 self.error_handler("Error", f"Failed to write to log file: {str(e)}")
         self.schedule_log_update()
+
+    def save_data(self, format_type: str):
+        """Save data using DataProcessor."""
+        self.data_processor.save_data(format_type)
 
     def update_loop(self):
         """Main loop replaced by timers, but check start/stop conditions in timers."""
