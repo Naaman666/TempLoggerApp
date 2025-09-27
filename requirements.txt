@@ -12,4 +12,4 @@ w1thermsensor
 openpyxl
 
 # GUI framework (usually included with Python standard library)
-tkinter
+# tkinter
