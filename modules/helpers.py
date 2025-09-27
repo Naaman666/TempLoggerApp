@@ -76,3 +76,10 @@ def ensure_directories(config: Dict[str, Any]):
     os.makedirs(config["measurement_folder"], exist_ok=True)
     os.makedirs(config["config_folder"], exist_ok=True)
     os.makedirs("config", exist_ok=True)
+
+def format_duration(seconds: float) -> str:
+    """Format duration as hours, minutes, seconds."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f"{hours:3d}h {minutes:2d}m {secs:2d}s"
