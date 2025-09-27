@@ -4,7 +4,7 @@ Temperature Logger Core Application Class.
 """
 
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 import os
