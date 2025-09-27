@@ -136,8 +136,6 @@ class GUIBuilder:
         self.save_config_button.grid(row=7, column=3, padx=5, pady=5)
         self.load_config_button = ttk.Button(self.root, text="Load sensor config", command=self.app.load_sensor_config)
         self.load_config_button.grid(row=7, column=4, padx=5, pady=5)
-        self.apply_config_button = ttk.Button(self.root, text="Apply Config", command=self.app.apply_config)
-        self.apply_config_button.grid(row=7, column=5, padx=5, pady=5)
 
         # Progress bar
         self.app.progress_bar = ttk.Progressbar(self.root, orient='horizontal', mode='determinate', maximum=100, length=400)
@@ -312,6 +310,7 @@ class TempLoggerApp:
         self.sensor_frame = None
         self.log_display = None
         self.lock = threading.Lock()
+        self.loaded_config = None  # Initialize loaded_config
 
         self.sensor_manager.init_sensors()
 
@@ -388,12 +387,16 @@ class TempLoggerApp:
             self.data_processor.limit_log_lines()
         except Exception as e:
             self.error_handler("Error", f"Failed to open log file: {str(e)}")
+            self.running_event.clear()  # Reset if failed
+            self.gui.start_button.config(state="normal")
+            self.gui.stop_button.config(state="disabled")
             return
 
         # Schedule first timers
         self.schedule_view_update()
         self.schedule_log_update()
         if self.measure_duration_sec is not None:
+            self.measure_start_time = time.time()
             self.root.after(1000, self.update_progress, time.time())
 
     def stop_logging(self):
@@ -410,8 +413,7 @@ class TempLoggerApp:
         self.gui.json_button.config(state="normal")
         if self.log_file:
             try:
-                with self.lock:
-                    self.log_file.close()
+                self.log_file.close()
             except IOError as e:
                 self.error_handler("Error", f"Failed to close log file: {str(e)}")
             self.log_file = None
@@ -480,12 +482,12 @@ class TempLoggerApp:
             temps_dict = self.sensor_manager.read_sensors()
         temps_list = [temps_dict[sid] for sid in self.sensor_manager.sensor_ids]
         if self.log_file:
-            with self.lock:
-                log_line = f"LOG,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
-                try:
-                    self.log_file.write(log_line + "\n")
-                except IOError as e:
-                    self.error_handler("Error", f"Failed to write to log file: {str(e)}")
+            log_line = f"LOG,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
+            try:
+                self.log_file.write(log_line + "\n")
+                self.log_file.flush()  # Ensure data is written immediately
+            except IOError as e:
+                self.error_handler("Error", f"Failed to write to log file: {str(e)}")
         self.schedule_log_update()
 
     def update_loop(self):
@@ -562,7 +564,7 @@ class TempLoggerApp:
             self.error_handler("Error", f"Saving configuration failed: {str(e)}")
 
     def load_sensor_config(self):
-        """Load sensor configuration from a JSON file and store for apply."""
+        """Load sensor configuration from a JSON file and apply immediately."""
         try:
             filename = filedialog.askopenfilename(
                 initialdir=self.config_folder,
@@ -572,39 +574,31 @@ class TempLoggerApp:
             if not filename:
                 return
             with open(filename, "r", encoding='utf-8') as f:
-                self.loaded_config = json.load(f)
-            self.log_display.insert(tk.END, f"Sensor configuration loaded: {filename}. Click 'Apply Config' to apply.\n")
+                loaded_config = json.load(f)
+            
+            # Apply configuration immediately
+            active_sensors = loaded_config.get("active_sensors", [])
+            for sid, var in self.sensor_manager.sensor_vars.items():
+                var.set(sid in active_sensors)
+            
+            self.sensor_manager.sensor_names = loaded_config.get("sensor_names", self.sensor_manager.sensor_names)
+            self.start_threshold.set(str(loaded_config.get("start_threshold", self.default_start_threshold)))
+            self.stop_threshold.set(str(loaded_config.get("stop_threshold", self.default_stop_threshold)))
+            self.log_interval.set(str(loaded_config.get("log_interval", self.default_log_interval)))
+            self.view_interval.set(str(loaded_config.get("view_interval", self.default_view_interval)))
+            self.duration.set(str(loaded_config.get("duration", 0.0)))
+            
+            # Update checkbutton texts
+            for sid, chk in self.sensor_manager.sensor_checkbuttons.items():
+                chk.config(text=self.sensor_manager.sensor_names[sid])
+            
+            self.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_manager.sensor_names[sid] for sid in self.sensor_manager.sensor_ids]
+            self.log_display.insert(tk.END, f"Sensor configuration loaded and applied: {filename}\n")
             self.sensor_manager.list_sensors_status()
             self.log_display.see(tk.END)
             self.data_processor.limit_log_lines()
         except Exception as e:
             self.error_handler("Error", f"Loading configuration failed: {str(e)}")
-
-    def apply_config(self):
-        """Apply the loaded configuration to GUI and sensors."""
-        if not self.loaded_config:
-            self.error_handler("Error", "No configuration loaded to apply")
-            return
-        try:
-            active_sensors = self.loaded_config.get("active_sensors", [])
-            for sid, var in self.sensor_manager.sensor_vars.items():
-                var.set(sid in active_sensors)
-            self.sensor_manager.sensor_names = self.loaded_config.get("sensor_names", self.sensor_manager.sensor_names)
-            self.start_threshold.set(str(self.loaded_config.get("start_threshold", self.default_start_threshold)))
-            self.stop_threshold.set(str(self.loaded_config.get("stop_threshold", self.default_stop_threshold)))
-            self.log_interval.set(str(self.loaded_config.get("log_interval", self.default_log_interval)))
-            self.view_interval.set(str(self.loaded_config.get("view_interval", self.default_view_interval)))
-            self.duration.set(str(self.loaded_config.get("duration", 0.0)))
-            # Update checkbutton texts
-            for sid, chk in self.sensor_manager.sensor_checkbuttons.items():
-                chk.config(text=self.sensor_manager.sensor_names[sid])
-            self.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_manager.sensor_names[sid] for sid in self.sensor_manager.sensor_ids]
-            self.log_display.insert(tk.END, "Configuration applied successfully.\n")
-            self.sensor_manager.list_sensors_status()
-            self.log_display.see(tk.END)
-            self.data_processor.limit_log_lines()
-        except Exception as e:
-            self.error_handler("Error", f"Applying configuration failed: {str(e)}")
 
     def on_closing(self):
         """Handle application shutdown."""
