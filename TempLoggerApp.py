@@ -2,6 +2,7 @@
 """
 Temperature Logger Application for DS18B20 sensors.
 Target hardware: Raspberry Pi Zero 2 W (512 MB RAM, 1 GHz quad-core CPU).
+asd
 """
 
 import tkinter as tk
