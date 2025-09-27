@@ -1,0 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+Temperature Logger Application - Main Entry Point
+"""
+
+import tkinter as tk
+from modules.temp_logger_app import TempLoggerApp
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = TempLoggerApp(root)
+    app.update_loop()
+    root.mainloop()
