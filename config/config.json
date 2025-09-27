@@ -1,0 +1,9 @@
+{
+    "default_log_interval": 10,
+    "default_view_interval": 3,
+    "default_start_threshold": 22.0,
+    "default_stop_threshold": 30.0,
+    "max_log_lines": 500,
+    "measurement_folder": "TestResults",
+    "config_folder": "SensorConfigs"
+}
