@@ -43,8 +43,8 @@ dist/
 # ❌ CSAK EZEKET NE TÖLTSD FEL (futáshoz NEM kell):
 # ==============================================
 
-# Mérési számláló (program létrehozza)
-config/counter.json
+# Mérési számláló (program létrehozza) commentelve ezt is feltölti
+# config/counter.json
 
 # Mérési eredmények (program generálja)
 TestResults/*.log
