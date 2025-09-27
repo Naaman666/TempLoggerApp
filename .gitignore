@@ -2,6 +2,9 @@
 # Temperature Logger App - Git Ignore Rules
 # ==============================================
 
+# Hogy a mappákat is feltöltse
+!.gitkeep
+
 # ---- Python általános ----
 __pycache__/
 *.py[cod]
