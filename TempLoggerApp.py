@@ -119,6 +119,10 @@ class GUIBuilder:
         self.stop_threshold_entry.grid(row=5, column=1, padx=5, pady=5)
         self.create_tooltip(self.stop_threshold_entry, "Enter float for stop temperature threshold (greater than start)")
 
+        # Sensor selection frame
+        self.app.sensor_frame = tk.Frame(self.root)
+        self.app.sensor_frame.grid(row=4, column=2, columnspan=2, padx=5, pady=5, sticky='W')
+
         # Log display
         self.app.log_display = scrolledtext.ScrolledText(self.root, width=160, height=25)
         self.app.log_display.grid(row=6, column=0, columnspan=4, padx=5, pady=5)
@@ -179,9 +183,7 @@ class SensorManager:
             self.sensor_names = {sid: f"Sensor_{i+1}" for i, sid in enumerate(self.sensor_ids)}
             self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
 
-            # Create sensor selection frame
-            self.app.sensor_frame = tk.Frame(self.app.root)
-            self.app.sensor_frame.grid(row=4, column=2, columnspan=2, padx=5, pady=5, sticky='W')
+            # Clear sensor frame
             for widget in self.app.sensor_frame.winfo_children():
                 widget.destroy()
             self.sensor_vars.clear()
@@ -196,19 +198,18 @@ class SensorManager:
                 self.sensor_checkbuttons[sensor.id] = chk
 
             if not self.sensors:
+                self.app.log_to_display("ERROR: No DS18B20 sensors found!\n")
                 self.app.error_handler("Warning", "No DS18B20 sensors found!")
-                self.app.log_display.insert(tk.END, "ERROR: No DS18B20 sensors found!\n")
-                self.app.log_display.see(tk.END)
 
         except Exception as e:
+            self.app.log_to_display(f"ERROR: Sensor initialization failed: {str(e)}\n")
             self.app.error_handler("Error", f"Sensor initialization failed: {str(e)}")
 
     def list_sensors_status(self):
         """Log the status of all sensors."""
-        self.app.log_display.insert(tk.END, "Sensor status diagnostics:\n")
+        self.app.log_to_display("Sensor status diagnostics:\n")
         for sid in self.sensor_ids:
-            self.app.log_display.insert(tk.END, f"Sensor {self.sensor_names[sid]} (ID: {sid}): {'Active' if self.sensor_vars[sid].get() else 'Inactive'}\n")
-        self.app.log_display.see(tk.END)
+            self.app.log_to_display(f"Sensor {self.sensor_names[sid]} (ID: {sid}): {'Active' if self.sensor_vars[sid].get() else 'Inactive'}\n")
 
     @retry()
     def read_sensors(self) -> Dict[str, Optional[float]]:
@@ -232,9 +233,10 @@ class DataProcessor:
 
     def limit_log_lines(self):
         """Limit the number of lines in the log display."""
-        content = self.app.log_display.get("1.0", tk.END).splitlines()
-        if len(content) > self.app.max_log_lines:
-            self.app.log_display.delete("1.0", f"{len(content) - self.app.max_log_lines}.0")
+        if hasattr(self.app, 'log_display') and self.app.log_display:
+            content = self.app.log_display.get("1.0", tk.END).splitlines()
+            if len(content) > self.app.max_log_lines:
+                self.app.log_display.delete("1.0", f"{len(content) - self.app.max_log_lines}.0")
 
     def save_data(self, format_type: str):
         """Save data to file in the specified format."""
@@ -271,9 +273,7 @@ class DataProcessor:
                 plt.savefig(f"{self.app.measurement_folder}/temp_plot_{timestamp}.png")
                 plt.savefig(f"{self.app.measurement_folder}/temp_plot_{timestamp}.pdf")
                 plt.close()
-            self.app.log_display.insert(tk.END, f"Data exported to {filename}\n")
-            self.app.log_display.see(tk.END)
-            self.limit_log_lines()
+            self.app.log_to_display(f"Data exported to {filename}\n")
         except Exception as e:
             self.app.error_handler("Error", f"Export failed: {str(e)}")
 
@@ -293,7 +293,10 @@ class TempLoggerApp:
         os.makedirs(self.measurement_folder, exist_ok=True)
         os.makedirs(self.config_folder, exist_ok=True)
 
+        # Initialize GUI first
         self.gui = GUIBuilder(self.root, self)
+        
+        # Initialize other components after GUI
         self.sensor_manager = SensorManager(self)
         self.data_processor = DataProcessor(self)
         self.export_manager = ExportManager()
@@ -304,15 +307,18 @@ class TempLoggerApp:
         self.measure_start_time = None
         self.measure_duration_sec = None
         self.data_columns = []
-        self.generate_output_var = None
-        self.progress_bar = None
-        self.progress_label = None
-        self.sensor_frame = None
-        self.log_display = None
         self.lock = threading.Lock()
-        self.loaded_config = None  # Initialize loaded_config
+        self.loaded_config = None
 
-        self.sensor_manager.init_sensors()
+        # Initialize sensors after GUI is ready
+        self.root.after(100, self.sensor_manager.init_sensors)
+
+    def log_to_display(self, message: str):
+        """Safely log message to display with thread safety."""
+        if hasattr(self, 'log_display') and self.log_display:
+            self.log_display.insert(tk.END, message)
+            self.log_display.see(tk.END)
+            self.data_processor.limit_log_lines()
 
     def validate_positive_int(self, value: str, field: str) -> bool:
         """Validate that the entry is a positive integer."""
@@ -370,6 +376,7 @@ class TempLoggerApp:
         if self.running_event.is_set():
             self.error_handler("Warning", "Logging already in progress!")
             return
+        
         self.running_event.set()
         self.gui.start_button.config(state="disabled")
         self.gui.stop_button.config(state="normal")
@@ -382,12 +389,10 @@ class TempLoggerApp:
         filename = f"{self.measurement_folder}/temp_log_{timestamp}.txt"
         try:
             self.log_file = open(filename, "w", encoding='utf-8')
-            self.log_display.insert(tk.END, f"Logging started, file: {filename}\n")
-            self.log_display.see(tk.END)
-            self.data_processor.limit_log_lines()
+            self.log_to_display(f"Logging started, file: {filename}\n")
         except Exception as e:
             self.error_handler("Error", f"Failed to open log file: {str(e)}")
-            self.running_event.clear()  # Reset if failed
+            self.running_event.clear()
             self.gui.start_button.config(state="normal")
             self.gui.stop_button.config(state="disabled")
             return
@@ -466,9 +471,7 @@ class TempLoggerApp:
             temps_dict = self.sensor_manager.read_sensors()
         temps_list = [temps_dict[sid] for sid in self.sensor_manager.sensor_ids]
         view_line = f"VIEW,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
-        self.root.after(0, self.log_display.insert, tk.END, view_line + "\n")
-        self.root.after(0, self.log_display.see, tk.END)
-        self.data_processor.limit_log_lines()
+        self.log_to_display(view_line + "\n")
         self.schedule_view_update()
 
     def log_update(self):
@@ -485,7 +488,7 @@ class TempLoggerApp:
             log_line = f"LOG,{seconds},{timestamp}," + ",".join([str(t) if t is not None else 'ERROR' for t in temps_list])
             try:
                 self.log_file.write(log_line + "\n")
-                self.log_file.flush()  # Ensure data is written immediately
+                self.log_file.flush()
             except IOError as e:
                 self.error_handler("Error", f"Failed to write to log file: {str(e)}")
         self.schedule_log_update()
@@ -507,28 +510,22 @@ class TempLoggerApp:
                 if any(temps_dict.get(sid, 0) is not None and temps_dict[sid] >= float(self.start_threshold.get()) for sid in self.sensor_manager.sensor_ids):
                     measurement_started = True
                     self.measure_start_time = current_time
-                    self.root.after(0, self.log_display.insert, tk.END, "Measurement started due to condition\n")
-                    self.root.after(0, self.log_display.see, tk.END)
-                    self.data_processor.limit_log_lines()
+                    self.log_to_display("Measurement started due to condition\n")
 
             if measurement_started:
                 # Stop on temperature threshold
                 if any(t is not None and t >= float(self.stop_threshold.get()) for t in temps_list):
-                    self.root.after(0, self.log_display.insert, tk.END, "Measurement stopped due to temperature threshold\n")
-                    self.root.after(0, self.log_display.see, tk.END)
-                    self.data_processor.limit_log_lines()
+                    self.log_to_display("Measurement stopped due to temperature threshold\n")
                     self.stop_logging()
                     return
 
                 # Stop on duration
                 if self.measure_duration_sec is not None and current_time - self.measure_start_time >= self.measure_duration_sec:
-                    self.root.after(0, self.log_display.insert, tk.END, "Measurement stopped due to duration\n")
-                    self.root.after(0, self.log_display.see, tk.END)
-                    self.data_processor.limit_log_lines()
+                    self.log_to_display("Measurement stopped due to duration\n")
                     self.stop_logging()
                     return
 
-            # Reschedule condition check (e.g., every 0.1s)
+            # Reschedule condition check
             self.root.after(100, check_conditions)
 
         # Start condition checking
@@ -557,9 +554,7 @@ class TempLoggerApp:
             }
             with open(filename, "w", encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
-            self.log_display.insert(tk.END, f"Sensor configuration saved: {filename}\n")
-            self.log_display.see(tk.END)
-            self.data_processor.limit_log_lines()
+            self.log_to_display(f"Sensor configuration saved: {filename}\n")
         except Exception as e:
             self.error_handler("Error", f"Saving configuration failed: {str(e)}")
 
@@ -593,10 +588,8 @@ class TempLoggerApp:
                 chk.config(text=self.sensor_manager.sensor_names[sid])
             
             self.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_manager.sensor_names[sid] for sid in self.sensor_manager.sensor_ids]
-            self.log_display.insert(tk.END, f"Sensor configuration loaded and applied: {filename}\n")
+            self.log_to_display(f"Sensor configuration loaded and applied: {filename}\n")
             self.sensor_manager.list_sensors_status()
-            self.log_display.see(tk.END)
-            self.data_processor.limit_log_lines()
         except Exception as e:
             self.error_handler("Error", f"Loading configuration failed: {str(e)}")
 
@@ -608,5 +601,5 @@ class TempLoggerApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = TempLoggerApp(root)
-    app.update_loop()  # Start the condition checking
+    app.update_loop()
     root.mainloop()
