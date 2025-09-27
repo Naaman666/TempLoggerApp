@@ -3,6 +3,8 @@
 Helper functions and utilities for Temperature Logger.
 """
 
+import tkinter as tk
+from tkinter import ttk
 import json
 import uuid
 import os
