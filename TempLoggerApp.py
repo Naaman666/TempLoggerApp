@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 import json
+import uuid
 from w1thermsensor import W1ThermSensor, SensorNotReadyError
 from functools import wraps
 from typing import Dict, List, Optional
@@ -21,6 +22,22 @@ from typing import Dict, List, Optional
 def sanitize_filename(name: str) -> str:
     """Sanitize filename by keeping only alphanumeric and allowed characters."""
     return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
+
+def generate_short_uuid() -> str:
+    """Generate a 6-character UUID."""
+    return str(uuid.uuid4())[:6]
+
+def get_next_counter() -> int:
+    """Get and increment the session counter."""
+    try:
+        with open("counter.json", "r") as f:
+            data = json.load(f)
+        counter = data.get("session_counter", 0) + 1
+        with open("counter.json", "w") as f:
+            json.dump({"session_counter": counter}, f)
+        return counter
+    except Exception:
+        return 1
 
 def retry(max_attempts: int = 5, delay: float = 0.1):
     """Decorator for retrying a function on specific exceptions."""
@@ -56,98 +73,150 @@ class GUIBuilder:
     def __init__(self, root: tk.Tk, app):
         self.root = root
         self.app = app
-        # Töröld az összes meglévő widgetet a root-ból a tiszta elrendezés érdekében
+        # Center window on screen
+        self.center_window()
+        # Clear existing widgets
         for widget in self.root.winfo_children():
             widget.destroy()
         self.init_gui()
 
+    def center_window(self):
+        """Center the window on the screen."""
+        self.root.update_idletasks()
+        width = 1400
+        height = 800
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
+
     def init_gui(self):
         """Initialize the GUI elements."""
         self.root.title("Temperature Logger")
-        self.root.geometry("1400x730")
         self.root.protocol("WM_DELETE_WINDOW", self.app.on_closing)
 
+        # Main frame for better organization
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Top controls frame
+        top_frame = ttk.Frame(main_frame)
+        top_frame.pack(fill=tk.X, pady=5)
+
         # Start/Stop buttons
-        self.start_button = ttk.Button(self.root, text="Start", command=self.app.start_logging)
-        self.start_button.grid(row=0, column=0, padx=5, pady=5, sticky='EW')
-        self.stop_button = ttk.Button(self.root, text="Stop", command=self.app.stop_logging, state="disabled")
-        self.stop_button.grid(row=0, column=1, padx=5, pady=5, sticky='EW')
+        self.start_button = ttk.Button(top_frame, text="Start", command=self.app.start_logging)
+        self.start_button.grid(row=0, column=0, padx=5, pady=5)
+        self.stop_button = ttk.Button(top_frame, text="Stop", command=self.app.stop_logging, state="disabled")
+        self.stop_button.grid(row=0, column=1, padx=5, pady=5)
 
         # Generate Output checkbox
         self.app.generate_output_var = tk.BooleanVar(value=True)
-        self.generate_output_check = ttk.Checkbutton(self.root, text="Generate Output", variable=self.app.generate_output_var)
-        self.generate_output_check.grid(row=0, column=2, padx=5, pady=5, sticky='EW')
+        self.generate_output_check = ttk.Checkbutton(top_frame, text="Generate Output", variable=self.app.generate_output_var)
+        self.generate_output_check.grid(row=0, column=2, padx=5, pady=5)
         self.create_tooltip(self.generate_output_check, "Generate plots (PNG, PDF) when stopping measurement")
 
         # (i) info label for tooltip
-        self.output_info_label = ttk.Label(self.root, text="(i)")
-        self.output_info_label.grid(row=0, column=3, padx=5, pady=5, sticky='EW')
+        self.output_info_label = ttk.Label(top_frame, text="(i)")
+        self.output_info_label.grid(row=0, column=3, padx=5, pady=5)
         self.create_tooltip(self.output_info_label, "Log file always generated")
 
+        # Measurement name entry
+        ttk.Label(top_frame, text="Measurement Name:").grid(row=0, column=4, padx=5, pady=5)
+        self.app.measurement_name = tk.StringVar(value="temptestlog")
+        self.measurement_name_entry = ttk.Entry(top_frame, textvariable=self.app.measurement_name, width=20)
+        self.measurement_name_entry.grid(row=0, column=5, padx=5, pady=5)
+        self.create_tooltip(self.measurement_name_entry, "Custom name for this measurement session")
+
+        # Settings frame
+        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding=5)
+        settings_frame.pack(fill=tk.X, pady=5)
+
         # Log interval
-        ttk.Label(self.root, text="Log interval (s):").grid(row=1, column=0, padx=5, pady=5)
+        ttk.Label(settings_frame, text="Log interval (s):").grid(row=0, column=0, padx=5, pady=2, sticky='W')
         self.app.log_interval = tk.StringVar(value=str(self.app.default_log_interval))
-        self.log_interval_entry = ttk.Entry(self.root, textvariable=self.app.log_interval, width=5, validate="focusout", validatecommand=(self.root.register(self.app.validate_positive_int), '%P', 'log_interval'))
-        self.log_interval_entry.grid(row=1, column=1, padx=5, pady=5)
-        self.create_tooltip(self.log_interval_entry, "Enter positive integer for log interval")
+        self.log_interval_entry = ttk.Entry(settings_frame, textvariable=self.app.log_interval, width=5, 
+                                           validate="focusout", 
+                                           validatecommand=(self.root.register(self.app.validate_positive_int), '%P', 'log_interval'))
+        self.log_interval_entry.grid(row=0, column=1, padx=5, pady=2, sticky='W')
 
         # View interval
-        ttk.Label(self.root, text="Display update (s):").grid(row=2, column=0, padx=5, pady=5)
+        ttk.Label(settings_frame, text="Display update (s):").grid(row=0, column=2, padx=5, pady=2, sticky='W')
         self.app.view_interval = tk.StringVar(value=str(self.app.default_view_interval))
-        self.view_interval_entry = ttk.Entry(self.root, textvariable=self.app.view_interval, width=5, validate="focusout", validatecommand=(self.root.register(self.app.validate_positive_int), '%P', 'view_interval'))
-        self.view_interval_entry.grid(row=2, column=1, padx=5, pady=5)
-        self.create_tooltip(self.view_interval_entry, "Enter positive integer for display update interval")
+        self.view_interval_entry = ttk.Entry(settings_frame, textvariable=self.app.view_interval, width=5, 
+                                            validate="focusout", 
+                                            validatecommand=(self.root.register(self.app.validate_positive_int), '%P', 'view_interval'))
+        self.view_interval_entry.grid(row=0, column=3, padx=5, pady=2, sticky='W')
 
         # Measurement duration
-        ttk.Label(self.root, text="Measurement duration (hours):").grid(row=3, column=0, padx=5, pady=5)
+        ttk.Label(settings_frame, text="Duration (hours):").grid(row=0, column=4, padx=5, pady=2, sticky='W')
         self.app.duration = tk.StringVar(value="0.0")
-        self.duration_entry = ttk.Entry(self.root, textvariable=self.app.duration, width=5, validate="focusout", validatecommand=(self.root.register(self.app.validate_non_negative_float), '%P', 'duration'))
-        self.duration_entry.grid(row=3, column=1, padx=5, pady=5)
-        self.create_tooltip(self.duration_entry, "Enter non-negative float for duration (0 for unlimited)")
+        self.duration_entry = ttk.Entry(settings_frame, textvariable=self.app.duration, width=5, 
+                                       validate="focusout", 
+                                       validatecommand=(self.root.register(self.app.validate_non_negative_float), '%P', 'duration'))
+        self.duration_entry.grid(row=0, column=5, padx=5, pady=2, sticky='W')
 
-        # Start threshold
-        ttk.Label(self.root, text="Start threshold (°C):").grid(row=4, column=0, padx=5, pady=5)
+        # Start threshold - moved up
+        ttk.Label(settings_frame, text="Start threshold (°C):").grid(row=1, column=0, padx=5, pady=2, sticky='W')
         self.app.start_threshold = tk.StringVar(value=str(self.app.default_start_threshold))
-        self.start_threshold_entry = ttk.Entry(self.root, textvariable=self.app.start_threshold, width=5, validate="focusout", validatecommand=(self.root.register(self.app.validate_float), '%P', 'start_threshold'))
-        self.start_threshold_entry.grid(row=4, column=1, padx=5, pady=5)
-        self.create_tooltip(self.start_threshold_entry, "Enter float for start temperature threshold")
+        self.start_threshold_entry = ttk.Entry(settings_frame, textvariable=self.app.start_threshold, width=5, 
+                                              validate="focusout", 
+                                              validatecommand=(self.root.register(self.app.validate_float), '%P', 'start_threshold'))
+        self.start_threshold_entry.grid(row=1, column=1, padx=5, pady=2, sticky='W')
 
-        # Stop threshold
-        ttk.Label(self.root, text="Stop threshold (°C):").grid(row=5, column=0, padx=5, pady=5)
+        # Stop threshold - moved up
+        ttk.Label(settings_frame, text="Stop threshold (°C):").grid(row=1, column=2, padx=5, pady=2, sticky='W')
         self.app.stop_threshold = tk.StringVar(value=str(self.app.default_stop_threshold))
-        self.stop_threshold_entry = ttk.Entry(self.root, textvariable=self.app.stop_threshold, width=5, validate="focusout", validatecommand=(self.root.register(self.app.validate_float), '%P', 'stop_threshold'))
-        self.stop_threshold_entry.grid(row=5, column=1, padx=5, pady=5)
-        self.create_tooltip(self.stop_threshold_entry, "Enter float for stop temperature threshold (greater than start)")
+        self.stop_threshold_entry = ttk.Entry(settings_frame, textvariable=self.app.stop_threshold, width=5, 
+                                             validate="focusout", 
+                                             validatecommand=(self.root.register(self.app.validate_float), '%P', 'stop_threshold'))
+        self.stop_threshold_entry.grid(row=1, column=3, padx=5, pady=2, sticky='W')
 
-        # Sensor selection frame
-        self.app.sensor_frame = tk.Frame(self.root)
-        self.app.sensor_frame.grid(row=4, column=2, columnspan=2, padx=5, pady=5, sticky='W')
+        # Sensors frame
+        sensors_frame = ttk.LabelFrame(main_frame, text="Sensors", padding=5)
+        sensors_frame.pack(fill=tk.X, pady=5)
+
+        # All sensors on/off button
+        self.all_sensors_button = ttk.Button(sensors_frame, text="All Sensors On/Off", command=self.app.toggle_all_sensors)
+        self.all_sensors_button.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky='W')
+
+        # Sensor selection frame with 2 columns
+        self.app.sensor_frame = ttk.Frame(sensors_frame)
+        self.app.sensor_frame.grid(row=1, column=0, columnspan=10, padx=5, pady=5, sticky='W')
 
         # Log display
-        self.app.log_display = scrolledtext.ScrolledText(self.root, width=160, height=25)
-        self.app.log_display.grid(row=6, column=0, columnspan=4, padx=5, pady=5)
+        log_frame = ttk.LabelFrame(main_frame, text="Log Display", padding=5)
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.app.log_display = scrolledtext.ScrolledText(log_frame, width=160, height=20)
+        self.app.log_display.pack(fill=tk.BOTH, expand=True)
+
+        # Bottom buttons frame
+        bottom_frame = ttk.Frame(main_frame)
+        bottom_frame.pack(fill=tk.X, pady=5)
 
         # Export buttons
-        self.excel_button = ttk.Button(self.root, text="Save Excel", command=lambda: self.app.save_data('excel'))
-        self.excel_button.grid(row=7, column=0, columnspan=1, padx=5, pady=5)
-        self.csv_button = ttk.Button(self.root, text="Save CSV", command=lambda: self.app.save_data('csv'))
-        self.csv_button.grid(row=7, column=1, columnspan=1, padx=5, pady=5)
-        self.json_button = ttk.Button(self.root, text="Save JSON", command=lambda: self.app.save_data('json'))
-        self.json_button.grid(row=7, column=2, columnspan=1, padx=5, pady=5)
+        self.excel_button = ttk.Button(bottom_frame, text="Save Excel", command=lambda: self.app.save_data('excel'))
+        self.excel_button.pack(side=tk.LEFT, padx=2)
+        self.csv_button = ttk.Button(bottom_frame, text="Save CSV", command=lambda: self.app.save_data('csv'))
+        self.csv_button.pack(side=tk.LEFT, padx=2)
+        self.json_button = ttk.Button(bottom_frame, text="Save JSON", command=lambda: self.app.save_data('json'))
+        self.json_button.pack(side=tk.LEFT, padx=2)
 
         # Config buttons
-        self.save_config_button = ttk.Button(self.root, text="Save sensor config", command=self.app.save_sensor_config)
-        self.save_config_button.grid(row=7, column=3, padx=5, pady=5)
-        self.load_config_button = ttk.Button(self.root, text="Load sensor config", command=self.app.load_sensor_config)
-        self.load_config_button.grid(row=7, column=4, padx=5, pady=5)
+        self.save_config_button = ttk.Button(bottom_frame, text="Save Config", command=self.app.save_sensor_config)
+        self.save_config_button.pack(side=tk.LEFT, padx=10)
+        self.load_config_button = ttk.Button(bottom_frame, text="Load Config", command=self.app.load_sensor_config)
+        self.load_config_button.pack(side=tk.LEFT, padx=2)
 
         # Progress bar
-        self.app.progress_bar = ttk.Progressbar(self.root, orient='horizontal', mode='determinate', maximum=100, length=400)
-        self.app.progress_label = ttk.Label(self.root, text="")
-        self.app.progress_bar.grid(row=8, column=0, columnspan=4, pady=5, sticky='EW')
-        self.app.progress_label.grid(row=9, column=0, columnspan=4, pady=2, sticky='EW')
-        self.app.progress_bar.grid_remove()
-        self.app.progress_label.grid_remove()
+        progress_frame = ttk.Frame(main_frame)
+        progress_frame.pack(fill=tk.X, pady=5)
+
+        self.app.progress_bar = ttk.Progressbar(progress_frame, orient='horizontal', mode='determinate', maximum=100, length=400)
+        self.app.progress_label = ttk.Label(progress_frame, text="")
+        self.app.progress_bar.pack(fill=tk.X, pady=2)
+        self.app.progress_label.pack(fill=tk.X, pady=2)
+        self.app.progress_bar.pack_forget()
+        self.app.progress_label.pack_forget()
 
     def create_tooltip(self, widget: tk.Widget, text: str):
         """Create a simple tooltip for a widget."""
@@ -174,32 +243,66 @@ class SensorManager:
         self.sensor_names: Dict[str, str] = {}
         self.sensor_vars: Dict[str, tk.BooleanVar] = {}
         self.sensor_checkbuttons: Dict[str, ttk.Checkbutton] = {}
+        self.sensor_labels: Dict[str, ttk.Label] = {}
 
     def init_sensors(self):
         """Initialize DS18B20 sensors and update GUI."""
         try:
             self.sensors = W1ThermSensor.get_available_sensors()
             self.sensor_ids = [s.id for s in self.sensors]
-            self.sensor_names = {sid: f"Sensor_{i+1}" for i, sid in enumerate(self.sensor_ids)}
-            self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
-
+            
+            # Always show 20 sensor slots
+            max_sensors = 20
+            self.sensor_names = {}
+            
             # Clear sensor frame
             for widget in self.app.sensor_frame.winfo_children():
                 widget.destroy()
             self.sensor_vars.clear()
             self.sensor_checkbuttons.clear()
+            self.sensor_labels.clear()
 
-            for i, sensor in enumerate(self.sensors):
-                var = tk.BooleanVar(value=True)
-                chk = ttk.Checkbutton(self.app.sensor_frame, text=self.sensor_names[sensor.id], variable=var)
-                chk.pack(anchor='w')
-                chk.bind("<Double-Button-1>", lambda e, sid=sensor.id: self.rename_sensor(sid))
-                self.sensor_vars[sensor.id] = var
-                self.sensor_checkbuttons[sensor.id] = chk
+            # Create 2 columns for sensors
+            for i in range(max_sensors):
+                row = i // 10  # 10 sensors per column
+                col = i % 10
+                column_offset = 1 if i >= 10 else 0
+
+                # Sensor number label
+                sensor_num_label = ttk.Label(self.app.sensor_frame, text=f"{i+1}.")
+                sensor_num_label.grid(row=col, column=column_offset*3, padx=2, pady=1, sticky='W')
+
+                if i < len(self.sensors):
+                    sensor = self.sensors[i]
+                    sensor_id = sensor.id
+                    self.sensor_names[sensor_id] = f"Sensor_{i+1}"
+                    
+                    var = tk.BooleanVar(value=True)
+                    chk = ttk.Checkbutton(self.app.sensor_frame, text=self.sensor_names[sensor_id], variable=var)
+                    chk.grid(row=col, column=column_offset*3+1, padx=2, pady=1, sticky='W')
+                    chk.bind("<Double-Button-1>", lambda e, sid=sensor_id: self.rename_sensor(sid))
+                    
+                    status_label = ttk.Label(self.app.sensor_frame, text="Active", foreground="green")
+                    status_label.grid(row=col, column=column_offset*3+2, padx=5, pady=1, sticky='W')
+                    
+                    self.sensor_vars[sensor_id] = var
+                    self.sensor_checkbuttons[sensor_id] = chk
+                    self.sensor_labels[sensor_id] = status_label
+                else:
+                    # Empty sensor slot
+                    empty_label = ttk.Label(self.app.sensor_frame, text="Empty", foreground="gray")
+                    empty_label.grid(row=col, column=column_offset*3+1, padx=2, pady=1, sticky='W')
+                    
+                    # Placeholder for alignment
+                    placeholder = ttk.Label(self.app.sensor_frame, text="")
+                    placeholder.grid(row=col, column=column_offset*3+2, padx=5, pady=1, sticky='W')
+
+            self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
 
             if not self.sensors:
-                self.app.log_to_display("ERROR: No DS18B20 sensors found!\n")
-                self.app.error_handler("Warning", "No DS18B20 sensors found!")
+                self.app.log_to_display("WARNING: No DS18B20 sensors found! Showing empty slots.\n")
+            else:
+                self.app.log_to_display(f"Found {len(self.sensors)} sensors. {max_sensors} slots available.\n")
 
         except Exception as e:
             self.app.log_to_display(f"ERROR: Sensor initialization failed: {str(e)}\n")
@@ -209,12 +312,43 @@ class SensorManager:
         """Log the status of all sensors."""
         self.app.log_to_display("Sensor status diagnostics:\n")
         for sid in self.sensor_ids:
-            self.app.log_to_display(f"Sensor {self.sensor_names[sid]} (ID: {sid}): {'Active' if self.sensor_vars[sid].get() else 'Inactive'}\n")
+            status = "Active" if self.sensor_vars[sid].get() else "Inactive"
+            self.app.log_to_display(f"Sensor {self.sensor_names[sid]} (ID: {sid}): {status}\n")
+
+    def toggle_all_sensors(self, state: Optional[bool] = None):
+        """Toggle all active sensors on/off."""
+        if state is None:
+            # Toggle based on current state
+            any_active = any(var.get() for var in self.sensor_vars.values())
+            new_state = not any_active
+        else:
+            new_state = state
+
+        for sid, var in self.sensor_vars.items():
+            var.set(new_state)
+            # Update status label
+            if sid in self.sensor_labels:
+                self.sensor_labels[sid].config(
+                    text="Active" if new_state else "Inactive",
+                    foreground="green" if new_state else "red"
+                )
+
+        action = "activated" if new_state else "deactivated"
+        self.app.log_to_display(f"All sensors {action}\n")
 
     @retry()
     def read_sensors(self) -> Dict[str, Optional[float]]:
-        """Read temperatures from all sensors."""
-        return {sensor.id: sensor.get_temperature() if self.sensor_vars[sensor.id].get() else None for sensor in self.sensors}
+        """Read temperatures from all active sensors."""
+        temps = {}
+        for sensor in self.sensors:
+            if self.sensor_vars.get(sensor.id, tk.BooleanVar(value=False)).get():
+                try:
+                    temps[sensor.id] = sensor.get_temperature()
+                except SensorNotReadyError:
+                    temps[sensor.id] = None
+            else:
+                temps[sensor.id] = None
+        return temps
 
     def rename_sensor(self, sensor_id: str):
         """Rename a sensor via double-click on its checkbutton."""
@@ -230,6 +364,33 @@ class DataProcessor:
         self.app = app
         self.data: List[List] = []
         self.lock = threading.Lock()
+        self.current_session_folder = None
+
+    def create_session_folder(self) -> str:
+        """Create a new session folder with proper naming."""
+        counter = get_next_counter()
+        timestamp = datetime.now().strftime("%Y-%m-%d|%H:%M:%S")
+        short_uuid = generate_short_uuid()
+        base_name = sanitize_filename(self.app.measurement_name.get())
+        
+        folder_name = f"{base_name}[AT:{counter:03d}][{timestamp}][UUID:{short_uuid}]"
+        folder_path = os.path.join(self.app.measurement_folder, folder_name)
+        os.makedirs(folder_path, exist_ok=True)
+        self.current_session_folder = folder_path
+        return folder_path
+
+    def get_session_filename(self, base_name: str, extension: str) -> str:
+        """Generate filename for current session."""
+        if not self.current_session_folder:
+            self.create_session_folder()
+        
+        counter = get_next_counter() - 1  # Use current counter
+        timestamp = datetime.now().strftime("%Y-%m-%d|%H:%M:%S")
+        short_uuid = generate_short_uuid()
+        base_name = sanitize_filename(base_name)
+        
+        filename = f"{base_name}[AT:{counter:03d}][{timestamp}][UUID:{short_uuid}].{extension}"
+        return os.path.join(self.current_session_folder, filename)
 
     def limit_log_lines(self):
         """Limit the number of lines in the log display."""
@@ -244,24 +405,28 @@ class DataProcessor:
             self.app.error_handler("Warning", "No data to export!")
             return
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{self.app.measurement_folder}/temp_log_{timestamp}.{format_type}"
             if format_type == 'excel':
                 if self.app.export_manager.check_overwrite('excel'):
+                    filename = self.get_session_filename("temp_data", "xlsx")
                     df = pd.DataFrame(self.data, columns=self.app.data_columns)
                     df.to_excel(filename, index=False)
                     self.app.export_manager.mark_exported('excel')
             elif format_type == 'csv':
                 if self.app.export_manager.check_overwrite('csv'):
+                    filename = self.get_session_filename("temp_data", "csv")
                     df = pd.DataFrame(self.data, columns=self.app.data_columns)
                     df.to_csv(filename, index=False)
                     self.app.export_manager.mark_exported('csv')
             elif format_type == 'json':
                 if self.app.export_manager.check_overwrite('json'):
+                    filename = self.get_session_filename("temp_data", "json")
                     with open(filename, 'w') as f:
                         json.dump([dict(zip(self.app.data_columns, row)) for row in self.data], f, indent=2)
                     self.app.export_manager.mark_exported('json')
             elif format_type == 'plot':
+                filename_png = self.get_session_filename("temp_plot", "png")
+                filename_pdf = self.get_session_filename("temp_plot", "pdf")
+                
                 plt.figure(figsize=(10, 6))
                 for col in self.app.data_columns[3:]:  # Skip Type, Seconds, Timestamp
                     plt.plot([row[1] for row in self.data], [row[self.app.data_columns.index(col)] for row in self.data], label=col)
@@ -270,10 +435,16 @@ class DataProcessor:
                 plt.title("Temperature Logs")
                 plt.legend()
                 plt.grid(True)
-                plt.savefig(f"{self.app.measurement_folder}/temp_plot_{timestamp}.png")
-                plt.savefig(f"{self.app.measurement_folder}/temp_plot_{timestamp}.pdf")
+                plt.savefig(filename_png)
+                plt.savefig(filename_pdf)
                 plt.close()
-            self.app.log_to_display(f"Data exported to {filename}\n")
+                
+                self.app.log_to_display(f"Plots saved to {filename_png} and {filename_pdf}\n")
+            else:
+                return
+                
+            if format_type != 'plot':
+                self.app.log_to_display(f"Data exported to {filename}\n")
         except Exception as e:
             self.app.error_handler("Error", f"Export failed: {str(e)}")
 
@@ -371,13 +542,18 @@ class TempLoggerApp:
         """Display an error or warning message."""
         messagebox.showinfo(title, message)
 
+    def toggle_all_sensors(self):
+        """Toggle all sensors on/off."""
+        self.sensor_manager.toggle_all_sensors()
+
     def start_logging(self):
         """Start the logging process."""
         if self.running_event.is_set():
             self.error_handler("Warning", "Logging already in progress!")
             return
         
-        # Clear previous data
+        # Create session folder and clear previous data
+        session_folder = self.data_processor.create_session_folder()
         with self.data_processor.lock:
             self.data_processor.data.clear()
         
@@ -388,12 +564,12 @@ class TempLoggerApp:
         self.gui.csv_button.config(state="disabled")
         self.gui.json_button.config(state="disabled")
 
-        # Open log file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{self.measurement_folder}/temp_log_{timestamp}.txt"
+        # Open log file in session folder
+        log_filename = self.data_processor.get_session_filename("temp_log", "txt")
         try:
-            self.log_file = open(filename, "w", encoding='utf-8')
-            self.log_to_display(f"Logging started, file: {filename}\n")
+            self.log_file = open(log_filename, "w", encoding='utf-8')
+            self.log_to_display(f"Logging started, session folder: {session_folder}\n")
+            self.log_to_display(f"Log file: {log_filename}\n")
         except Exception as e:
             self.error_handler("Error", f"Failed to open log file: {str(e)}")
             self.running_event.clear()
@@ -426,8 +602,10 @@ class TempLoggerApp:
             except IOError as e:
                 self.error_handler("Error", f"Failed to close log file: {str(e)}")
             self.log_file = None
-        self.progress_bar.grid_remove()
-        self.progress_label.grid_remove()
+        
+        # Hide progress bar
+        self.gui.app.progress_bar.pack_forget()
+        self.gui.app.progress_label.pack_forget()
 
         # Generate plots if checkbox is checked and we have data
         if self.generate_output_var.get():
@@ -450,11 +628,11 @@ class TempLoggerApp:
             end_time_str = f"Expected completion: {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
             self.progress_bar['value'] = min(progress, 100)
             self.progress_label['text'] = f"{remaining_str} | {end_time_str}"
-            self.progress_bar.grid()
-            self.progress_label.grid()
+            self.progress_bar.pack(fill=tk.X, pady=2)
+            self.progress_label.pack(fill=tk.X, pady=2)
         else:
-            self.progress_bar.grid_remove()
-            self.progress_label.grid_remove()
+            self.progress_bar.pack_forget()
+            self.progress_label.pack_forget()
         if self.running_event.is_set():
             self.root.after(1000, self.update_progress, time.time())
 
@@ -596,7 +774,8 @@ class TempLoggerApp:
                 "stop_threshold": float(self.stop_threshold.get()),
                 "log_interval": int(self.log_interval.get()),
                 "view_interval": int(self.view_interval.get()),
-                "duration": float(self.duration.get())
+                "duration": float(self.duration.get()),
+                "measurement_name": self.measurement_name.get()
             }
             with open(filename, "w", encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
@@ -628,6 +807,7 @@ class TempLoggerApp:
             self.log_interval.set(str(loaded_config.get("log_interval", self.default_log_interval)))
             self.view_interval.set(str(loaded_config.get("view_interval", self.default_view_interval)))
             self.duration.set(str(loaded_config.get("duration", 0.0)))
+            self.measurement_name.set(loaded_config.get("measurement_name", "temptestlog"))
             
             # Update checkbutton texts
             for sid, chk in self.sensor_manager.sensor_checkbuttons.items():
