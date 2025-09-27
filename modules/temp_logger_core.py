@@ -66,4 +66,7 @@ class TempLoggerApp:
         self.data_processor = DataProcessor(self)
         self.export_manager = ExportManager()
 
-    # ... (a többi metódus változatlan)
+    def on_closing(self):
+        """Handle application shutdown."""
+        self.stop_logging()
+        self.root.destroy()
