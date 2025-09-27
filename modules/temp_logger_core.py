@@ -68,5 +68,17 @@ class TempLoggerApp:
 
     def on_closing(self):
         """Handle application shutdown."""
-        self.stop_logging()
-        self.root.destroy()
+        # Stop logging if running
+        if hasattr(self, 'running_event') and self.running_event.is_set():
+            self.stop_logging()
+        
+    # Close log file if open
+        if hasattr(self, 'log_file') and self.log_file:
+            try:
+                self.log_file.close()
+            except Exception:
+                pass
+        
+        # Destroy the window
+        if hasattr(self, 'root') and self.root:
+            self.root.destroy()
