@@ -53,7 +53,8 @@ class GUIBuilder:
         self.generate_output_check = ttk.Checkbutton(top_frame, text="Generate Output", 
                                                    variable=self.app.generate_output_var)
         self.generate_output_check.grid(row=0, column=2, padx=5, pady=5)
-        self.create_tooltip(self.generate_output_check, "Generate plots when stopping measurement")
+        self.create_tooltip(self.generate_output_check, 
+                           "Generate plots and Excel chart when stopping measurement. The .log file is always created.")
 
         # Measurement name entry
         ttk.Label(top_frame, text="Measurement Name:").grid(row=0, column=4, padx=5, pady=5)
@@ -61,36 +62,49 @@ class GUIBuilder:
         self.measurement_name_entry = ttk.Entry(top_frame, textvariable=self.app.measurement_name, width=20)
         self.measurement_name_entry.grid(row=0, column=5, padx=5, pady=5)
 
-        # Settings frame
-        settings_frame = ttk.LabelFrame(main_frame, text="Settings", padding=5)
-        settings_frame.pack(fill=tk.X, pady=5)
+        # MAIN TIMING frame
+        timing_frame = ttk.LabelFrame(main_frame, text="Main Timing", padding=5)
+        timing_frame.pack(fill=tk.X, pady=5)
 
-        # First row of settings
-        ttk.Label(settings_frame, text="Log interval (s):").grid(row=0, column=0, padx=5, pady=2, sticky='W')
+        ttk.Label(timing_frame, text="Log interval (s):").grid(row=0, column=0, padx=5, pady=2, sticky='W')
         self.app.log_interval = tk.StringVar(value=str(self.app.default_log_interval))
-        self.log_interval_entry = ttk.Entry(settings_frame, textvariable=self.app.log_interval, width=5)
+        self.log_interval_entry = ttk.Entry(timing_frame, textvariable=self.app.log_interval, width=5)
         self.log_interval_entry.grid(row=0, column=1, padx=5, pady=2, sticky='W')
 
-        ttk.Label(settings_frame, text="Display update (s):").grid(row=0, column=2, padx=5, pady=2, sticky='W')
+        ttk.Label(timing_frame, text="Display update (s):").grid(row=0, column=2, padx=5, pady=2, sticky='W')
         self.app.view_interval = tk.StringVar(value=str(self.app.default_view_interval))
-        self.view_interval_entry = ttk.Entry(settings_frame, textvariable=self.app.view_interval, width=5)
+        self.view_interval_entry = ttk.Entry(timing_frame, textvariable=self.app.view_interval, width=5)
         self.view_interval_entry.grid(row=0, column=3, padx=5, pady=2, sticky='W')
 
-        ttk.Label(settings_frame, text="Duration (hours):").grid(row=0, column=4, padx=5, pady=2, sticky='W')
-        self.app.duration = tk.StringVar(value="0.0")
-        self.duration_entry = ttk.Entry(settings_frame, textvariable=self.app.duration, width=5)
-        self.duration_entry.grid(row=0, column=5, padx=5, pady=2, sticky='W')
+        # MEASUREMENT DURATION frame
+        duration_frame = ttk.LabelFrame(main_frame, text="Measurement Duration", padding=5)
+        duration_frame.pack(fill=tk.X, pady=5)
 
-        # Second row of settings (thresholds)
-        ttk.Label(settings_frame, text="Start threshold (°C):").grid(row=1, column=0, padx=5, pady=2, sticky='W')
-        self.app.start_threshold = tk.StringVar(value=str(self.app.default_start_threshold))
-        self.start_threshold_entry = ttk.Entry(settings_frame, textvariable=self.app.start_threshold, width=5)
-        self.start_threshold_entry.grid(row=1, column=1, padx=5, pady=2, sticky='W')
+        self.app.duration_enabled = tk.BooleanVar(value=False)
+        duration_check = ttk.Checkbutton(duration_frame, text="Enable duration limit", 
+                                       variable=self.app.duration_enabled)
+        duration_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
 
-        ttk.Label(settings_frame, text="Stop threshold (°C):").grid(row=1, column=2, padx=5, pady=2, sticky='W')
-        self.app.stop_threshold = tk.StringVar(value=str(self.app.default_stop_threshold))
-        self.stop_threshold_entry = ttk.Entry(settings_frame, textvariable=self.app.stop_threshold, width=5)
-        self.stop_threshold_entry.grid(row=1, column=3, padx=5, pady=2, sticky='W')
+        ttk.Label(duration_frame, text="Minutes:").grid(row=0, column=1, padx=5, pady=2, sticky='W')
+        self.app.duration_minutes = tk.StringVar(value="0")
+        self.duration_minutes_entry = ttk.Entry(duration_frame, textvariable=self.app.duration_minutes, width=5)
+        self.duration_minutes_entry.grid(row=0, column=2, padx=5, pady=2, sticky='W')
+
+        ttk.Label(duration_frame, text="Hours:").grid(row=0, column=3, padx=5, pady=2, sticky='W')
+        self.app.duration_hours = tk.StringVar(value="0")
+        self.duration_hours_entry = ttk.Entry(duration_frame, textvariable=self.app.duration_hours, width=5)
+        self.duration_hours_entry.grid(row=0, column=4, padx=5, pady=2, sticky='W')
+
+        ttk.Label(duration_frame, text="Days:").grid(row=0, column=5, padx=5, pady=2, sticky='W')
+        self.app.duration_days = tk.StringVar(value="0")
+        self.duration_days_entry = ttk.Entry(duration_frame, textvariable=self.app.duration_days, width=5)
+        self.duration_days_entry.grid(row=0, column=6, padx=5, pady=2, sticky='W')
+
+        # TEMPERATURE-CONTROLLED MEASUREMENT frame (placeholder - complex implementation needed)
+        temp_control_frame = ttk.LabelFrame(main_frame, text="Temperature-Controlled Measurement", padding=5)
+        temp_control_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(temp_control_frame, text="Feature coming soon...").grid(row=0, column=0, padx=5, pady=10)
 
         # Sensors frame
         sensors_frame = ttk.LabelFrame(main_frame, text="Sensors", padding=5)
@@ -99,18 +113,18 @@ class GUIBuilder:
         # All sensors on/off button
         self.all_sensors_button = ttk.Button(sensors_frame, text="All Sensors On/Off", 
                                            command=self.app.toggle_all_sensors)
-        self.all_sensors_button.grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky='W')
+        self.all_sensors_button.grid(row=0, column=0, padx=5, pady=5, sticky='W')
 
-        # Sensor selection frame with 2 columns
+        # Sensor selection frame
         self.app.sensor_frame = ttk.Frame(sensors_frame)
         self.app.sensor_frame.grid(row=1, column=0, columnspan=10, padx=5, pady=5, sticky='W')
 
-        # Log display
+        # Log display with Treeview
         log_frame = ttk.LabelFrame(main_frame, text="Log Display", padding=5)
         log_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.app.log_display = scrolledtext.ScrolledText(log_frame, width=160, height=20)
-        self.app.log_display.pack(fill=tk.BOTH, expand=True)
+        # Create Treeview for tabular display
+        self._create_log_treeview(log_frame)
 
         # Bottom buttons frame
         bottom_frame = ttk.Frame(main_frame)
@@ -149,6 +163,64 @@ class GUIBuilder:
         self.app.progress_label.pack(fill=tk.X, pady=2)
         self.app.progress_bar.pack_forget()
         self.app.progress_label.pack_forget()
+
+    def _create_log_treeview(self, parent):
+        """Create Treeview for tabular log display."""
+        # Create Treeview with scrollbars
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create vertical scrollbar
+        v_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Create horizontal scrollbar
+        h_scrollbar = ttk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Create Treeview
+        self.app.log_tree = ttk.Treeview(tree_frame, 
+                                       yscrollcommand=v_scrollbar.set,
+                                       xscrollcommand=h_scrollbar.set,
+                                       show='tree headings',
+                                       height=15)
+        self.app.log_tree.pack(fill=tk.BOTH, expand=True)
+
+        # Configure scrollbars
+        v_scrollbar.config(command=self.app.log_tree.yview)
+        h_scrollbar.config(command=self.app.log_tree.xview)
+
+        # Configure columns (will be populated when sensors are initialized)
+        self.app.log_tree["columns"] = ("timestamp",)
+        self.app.log_tree.column("#0", width=0, stretch=tk.NO)  # Hide first column
+        self.app.log_tree.column("timestamp", width=120, anchor=tk.CENTER)
+
+        self.app.log_tree.heading("timestamp", text="Timestamp")
+
+    def update_log_treeview_columns(self, sensor_names):
+        """Update Treeview columns based on sensor names."""
+        # Clear existing columns
+        for col in self.app.log_tree["columns"]:
+            self.app.log_tree.heading(col, text="")
+            self.app.log_tree.column(col, width=0)
+
+        # Set new columns
+        columns = ["timestamp"] + list(sensor_names.values())
+        self.app.log_tree["columns"] = columns
+
+        # Configure timestamp column
+        self.app.log_tree.column("timestamp", width=120, anchor=tk.CENTER)
+        self.app.log_tree.heading("timestamp", text="Timestamp")
+
+        # Configure sensor columns
+        for i, (sensor_id, name) in enumerate(sensor_names.items(), 1):
+            col_width = 80 if "Ambient" in name else 70
+            self.app.log_tree.column(name, width=col_width, anchor=tk.CENTER)
+            self.app.log_tree.heading(name, text=name)
+
+            # Alternate column colors
+            if i % 2 == 0:
+                self.app.log_tree.tag_configure(f"col_{i}", background="#f0f0f0")
 
     def create_tooltip(self, widget: tk.Widget, text: str):
         """Create a simple tooltip for a widget."""
