@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Helper functions and utilities for Temperature Logger.
+Helper functions for Temperature Logger.
 """
 
 import tkinter as tk
@@ -9,20 +9,20 @@ import json
 import uuid
 import os
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List
 from w1thermsensor import SensorNotReadyError
 from functools import wraps
 
 def sanitize_filename(name: str) -> str:
-    """Sanitize filename by keeping only alphanumeric and allowed characters."""
+    """Sanitize filename."""
     return "".join(c for c in name if c.isalnum() or c in (' ', '-', '_')).strip()
 
 def generate_short_uuid() -> str:
-    """Generate a 6-character UUID."""
+    """Generate short UUID."""
     return str(uuid.uuid4())[:6]
 
 def get_next_counter() -> int:
-    """Get and increment the session counter."""
+    """Get next counter."""
     try:
         with open("config/counter.json", "r") as f:
             data = json.load(f)
@@ -30,21 +30,19 @@ def get_next_counter() -> int:
         with open("config/counter.json", "w") as f:
             json.dump({"session_counter": counter}, f)
         return counter
-    except Exception as e:
-        print(f"Counter error: {e}")
+    except Exception:
         return 1
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from JSON file."""
+    """Load config."""
     try:
         with open("config/config.json", "r") as f:
             return json.load(f)
-    except Exception as e:
-        print(f"Config load error: {e}")
+    except Exception:
         return get_default_config()
 
 def get_default_config() -> Dict[str, Any]:
-    """Return default configuration."""
+    """Default config."""
     return {
         "default_log_interval": 10,
         "default_view_interval": 3,
@@ -56,7 +54,7 @@ def get_default_config() -> Dict[str, Any]:
     }
 
 def retry(max_attempts: int = 5, delay: float = 0.1):
-    """Decorator for retrying a function on specific exceptions."""
+    """Retry decorator."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -72,14 +70,30 @@ def retry(max_attempts: int = 5, delay: float = 0.1):
     return decorator
 
 def ensure_directories(config: Dict[str, Any]):
-    """Ensure required directories exist."""
+    """Ensure dirs."""
     os.makedirs(config["measurement_folder"], exist_ok=True)
     os.makedirs(config["config_folder"], exist_ok=True)
     os.makedirs("config", exist_ok=True)
 
 def format_duration(seconds: float) -> str:
-    """Format duration as hours, minutes, seconds."""
+    """Format duration."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     return f"{hours:3d}h {minutes:2d}m {secs:2d}s"
+
+# New for conditions
+def sanitize_sensor_list(sensors: List[str], available_ids: List[str]) -> List[str]:
+    """Sanitize and validate sensor list."""
+    return [sid for sid in sensors if sid in available_ids]
+
+def evaluate_operator(temp: Optional[float], thresh: float, op: str) -> bool:
+    """Evaluate temp op thresh."""
+    if temp is None:
+        return False
+    if op == '>': return temp > thresh
+    if op == '<': return temp < thresh
+    if op == '>=': return temp >= thresh
+    if op == '<=': return temp <= thresh
+    if op == '=': return abs(temp - thresh) < 0.1  # Tolerance for float eq
+    return False
