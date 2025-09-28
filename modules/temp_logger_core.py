@@ -28,17 +28,14 @@ class TempLoggerApp:
         self.config = load_config()
         ensure_directories(self.config)
         
-        # Store config values (legacy thresholds removed, but kept for compat)
+        # Store config values
         self.default_log_interval = self.config["default_log_interval"]
         self.default_view_interval = self.config["default_view_interval"]
         self.max_log_lines = self.config["max_log_lines"]
         self.measurement_folder = self.config["measurement_folder"]
         self.config_folder = self.config["config_folder"]
         
-        # Initialize components
-        self.initialize_components()
-        
-        # Runtime variables
+        # Runtime variables (ÁTHELYEZVE a GUI inicializálása ELÉ)
         self.running_event = threading.Event()
         self.log_file = None
         self.view_timer = None
@@ -55,7 +52,7 @@ class TempLoggerApp:
         self.duration_minutes = tk.StringVar(value="0")
         self.duration_hours = tk.StringVar(value="0")
         self.duration_days = tk.StringVar(value="0")
-        self.generate_output_var = tk.BooleanVar(value=True)
+        self.generate_output_var = tk.BooleanVar(value=True) # <<< HIBA JAVÍTVA
         self.log_interval = tk.StringVar(value=str(self.default_log_interval))
         self.view_interval = tk.StringVar(value=str(self.default_view_interval))
         self.measurement_name = tk.StringVar(value="temptestlog")
@@ -64,6 +61,9 @@ class TempLoggerApp:
         self.start_conditions: List[Dict[str, any]] = []
         self.stop_conditions: List[Dict[str, any]] = []
 
+        # Initialize components
+        self.initialize_components()
+        
         # Initialize sensors after GUI is ready
         self.root.after(100, self.initialize_sensors)
 
@@ -93,7 +93,7 @@ class TempLoggerApp:
 
     def log_to_treeview(self, elapsed_seconds: float, temperatures: list):
         """Add a row to the Treeview with formatted data."""
-        if not hasattr(self, 'log_tree') or not self.log_tree:
+        if not hasattr(self, 'log_tree'): # Javított feltétel
             return
             
         # Format timestamp
