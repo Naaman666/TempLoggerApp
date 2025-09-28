@@ -111,32 +111,33 @@ class GUIBuilder:
         ttk.Entry(control_frame, textvariable=self.app.measurement_name, width=30).grid(row=0, column=1, padx=5, pady=5, sticky='W')
         self.create_tooltip(control_frame.winfo_children()[-1], "File name for the measurement logs.")
 
-        # Log Interval (Szélesség 5-re csökkentve, kb 999-ig fér el)
+        # Log Interval (Szélesség 5-re csökkentve)
         ttk.Label(control_frame, text="Log Interval (s):").grid(row=0, column=2, padx=5, pady=5, sticky='W')
         ttk.Entry(control_frame, textvariable=self.app.log_interval, width=5).grid(row=0, column=3, padx=5, pady=5, sticky='W')
         self.create_tooltip(control_frame.winfo_children()[-1], "Interval for writing data to log file (seconds).")
 
-        # View Interval (Szélesség 3-ra csökkentve, kb 99-ig fér el)
+        # View Interval (Szélesség 3-ra csökkentve)
         ttk.Label(control_frame, text="View Interval (s):").grid(row=0, column=4, padx=5, pady=5, sticky='W')
         ttk.Entry(control_frame, textvariable=self.app.view_interval, width=3).grid(row=0, column=5, padx=5, pady=5, sticky='W')
-        self.create_tooltip(control_frame.winfo_children()[-1], "Interval for updating data on the screen (seconds). Should be >= Log Interval.")
+        self.create_tooltip(control_frame.winfo_children()[-1], "Interval for updating data on the screen (seconds).")
 
         # Output Checkbox és Tooltip (Egyszerűsített felirat)
         output_check = ttk.Checkbutton(control_frame, text="Generate output", variable=self.app.generate_output_var)
         output_check.grid(row=0, column=6, padx=10, pady=5, sticky='W')
         self.create_tooltip(output_check, "Generate additional output files (CSV, PDF, PNG, Excel) after logging stops. Note: The raw JSON log file is always created.")
         
-        # Open Last Measurement Button (Új gomb)
-        self.open_folder_button = ttk.Button(control_frame, text="Open Last Measurement", command=self.app.open_last_measurement_folder)
-        self.open_folder_button.grid(row=0, column=7, padx=5, pady=5, sticky='W')
-        self.create_tooltip(self.open_folder_button, "Opens the folder of the most recently finished measurement session.")
-
         # Start/Stop Buttons
         self.start_button = ttk.Button(control_frame, text="Start Logging", command=self.app.start_logging, state=tk.NORMAL)
         self.start_button.grid(row=0, column=8, padx=5, pady=5, sticky='W')
         
         self.stop_button = ttk.Button(control_frame, text="Stop Logging", command=self.app.stop_logging, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=9, padx=5, pady=5, sticky='W')
+        
+        # Open Last Measurement Button (Új pozíció a Stop gomb után)
+        self.open_folder_button = ttk.Button(control_frame, text="Open Last Measurement", command=self.app.open_last_measurement_folder)
+        self.open_folder_button.grid(row=0, column=10, padx=5, pady=5, sticky='W')
+        self.create_tooltip(self.open_folder_button, "Opens the folder of the most recently finished measurement session (highest AT:x number).")
+
 
         # --- Side Panel (Container for Notebook) ---
         side_panel = ttk.Frame(main_frame, padding="5 5 5 5")
