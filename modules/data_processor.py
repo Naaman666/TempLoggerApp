@@ -42,232 +42,201 @@ class DataProcessor:
             minutes = int(self.app.duration_minutes.get())
             return days * 86400 + hours * 3600 + minutes * 60
         except ValueError:
-            self.app.log_to_display("Warning: Invalid duration input. Duration limit ignored.\n")
             return None
 
-    def log_data_point(self, data_point: List):
-        """Add a data point to the internal list and update the display."""
-        with self.lock:
-            self.data.append(data_point)
+    def init_new_session(self, measurement_name: str):
+        """Initialize all session-specific variables and create the measurement folder."""
+        # Megszerezzük a következő sorszámot
+        self.session_counter = get_next_counter()
+        self.session_uuid = generate_short_uuid()
         
-        # [0]=Type, [1]=Seconds, [2]=Timestamp, [3:]=Temps
-        temps_only = [data_point[i] for i in range(3, len(data_point))]
-        self.app.log_to_treeview(data_point[1], temps_only)
+        # Létrehozzuk a mappa nevét az AT sorszámmal (AT:xxxx) és a mérés névvel
+        sanitized_name = sanitize_filename(measurement_name)
+        folder_name = f"AT:{self.session_counter:04d}_{sanitized_name}_{self.session_uuid}"
+        
+        self.current_session_folder = os.path.join(self.app.measurement_folder, folder_name)
+        
+        # Mappa létrehozása
+        if not os.path.exists(self.current_session_folder):
+            os.makedirs(self.current_session_folder, exist_ok=True)
 
-    def get_all_logged_data(self) -> List[List]:
-        """Return a copy of all logged data."""
-        with self.lock:
-            return list(self.data)
+        self.data = []
+        self.session_start_time = datetime.now()
+        self.session_end_time = None
+        
+        # Frissítjük az oszlopneveket a Treeview-hoz és az exportáláshoz
+        self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.app.sensor_manager.sensor_names[sid] for sid in self.app.sensor_manager.sensor_ids]
 
-    def check_conditions(self, conditions: List[Dict[str, Any]]) -> bool:
-        """Check if any condition group is met based on the last reading."""
-        
-        # A sensor_manager-től kérjük le a legutóbbi adatokat
-        last_temps = self.app.sensor_manager.get_last_readings()
-        
-        if not conditions:
-            return False
-        
-        results: List[bool] = []
-        
-        for condition in conditions:
-            sensors = condition.get('sensors', [])
-            operator = condition.get('operator', '>')
-            threshold = condition.get('threshold', 0.0)
-            logic = condition.get('logic')
-            
-            group_results: List[bool] = []
-            
-            for sid in sensors:
-                temp = last_temps.get(sid)
-                
-                if temp is not None:
-                    group_results.append(evaluate_operator(temp, threshold, operator))
-            
-            # Evaluate group logic
-            if not group_results:
-                continue # Skip condition if no sensors read valid data
-                
-            if logic == 'AND':
-                results.append(all(group_results))
-            elif logic == 'OR' or logic is None: # Treat None as OR/Single
-                results.append(any(group_results))
-                
-        # Final check: if any of the evaluated condition groups are TRUE, the overall condition is met.
-        return any(results)
-
-    def create_session_folder(self) -> str:
-        """Create a temporary session folder, final name set at stop."""
-        if self.session_counter is None:
-            self.session_counter = get_next_counter()
-            self.session_uuid = generate_short_uuid()
-            self.session_start_time = datetime.now()
-        
-        timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S")
-        base_name = sanitize_filename(self.app.measurement_name.get())
-        
-        # Temporary folder name (will be renamed at stop)
-        folder_name = f"{base_name}-[AT:{self.session_counter}]-[START:{timestamp}]-[UUID:{self.session_uuid}]"
-        folder_path = os.path.join(self.app.measurement_folder, folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-        self.temp_session_folder = folder_path
-        self.current_session_folder = folder_path
-        return folder_path
+        # Export állapotok visszaállítása (hogy újra exportálhassunk)
+        self.app.export_manager.reset_exports()
 
     def finalize_session_folder(self):
-        """Rename folder with end timestamp."""
-        # Check if a session was actually started (session_start_time is not None)
-        if not self.session_start_time:
-            if self.temp_session_folder and os.path.exists(self.temp_session_folder):
-                 # Try to remove the empty temp folder if it exists
-                 try:
-                     os.rmdir(self.temp_session_folder)
-                 except OSError:
-                     pass # Folder was not empty, leave it for manual check
-            self.temp_session_folder = None
-            self.current_session_folder = None
-            return 
-            
-        # Set end time if it was not set during a normal stop
-        if not self.session_end_time:
-            self.session_end_time = datetime.now()
-            
-        start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S")
-        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S")
-        base_name = sanitize_filename(self.app.measurement_name.get())
-        
-        final_folder_name = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}]"
-        final_folder_path = os.path.join(self.app.measurement_folder, final_folder_name)
-        
-        if self.temp_session_folder and os.path.exists(self.temp_session_folder):
-            os.rename(self.temp_session_folder, final_folder_path)
-            self.current_session_folder = final_folder_path
-
-    def reset_session_data(self):
-        """Clear the logged data."""
-        with self.lock:
-            self.data.clear()
-
-    def reset_session_times(self):
-        """Reset session metadata (used after finalize)."""
-        self.session_counter = None
-        self.session_uuid = None
-        self.session_start_time = None
-        self.session_end_time = None
-        self.current_session_folder = None
-        self.temp_session_folder = None
-
-    def get_session_filename(self, base_name: str, extension: str) -> str:
-        """Generate filename for current session."""
-        if not self.current_session_folder:
-            # Ha a mérés megállt, de valamiért a mappa még nem volt finalizálva, akkor újrapróbáljuk
-            self.finalize_session_folder() 
-            if not self.current_session_folder:
-                 # Ha még mindig nincs mappa (pl. a mérés túl rövid volt), létrehozunk egy újat
-                 self.create_session_folder() 
-        
-        # A finalize_session_folder állítja be az end_timestamp-et
-        if not self.session_end_time:
-            self.session_end_time = datetime.now()
-            
-        start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_start_time else "NODATE"
-        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_end_time else "NODATE"
-        
-        base_name = sanitize_filename(base_name)
-        filename = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}].{extension}"
-        return os.path.join(self.current_session_folder, filename)
-
-    def limit_log_lines(self):
-        """Limit the number of lines in the log display."""
-        # Not needed for Treeview
+        """Placeholder for cleanup."""
         pass
 
-    def save_data(self, format_type: str, plot_formats: List[str] = None):
-        """Save data to file in the specified format."""
-        if not self.data:
-            self.app.error_handler("Warning", "No data to export!")
-            return
-        
-        try:
-            if format_type == 'excel':
-                if self.app.export_manager.check_overwrite('excel'):
-                    filename = self.get_session_filename("temp_chart", "xlsx")
-                    self._save_excel_with_chart(filename)
-                    self.app.export_manager.mark_exported('excel')
-                    
-            elif format_type == 'csv':
-                if self.app.export_manager.check_overwrite('csv'):
-                    filename = self.get_session_filename("temp_data", "csv")
-                    df = pd.DataFrame(self.data, columns=self.app.data_columns)
-                    df.to_csv(filename, index=False)
-                    self.app.export_manager.mark_exported('csv')
-                    
-            elif format_type == 'json':
-                if self.app.export_manager.check_overwrite('json'):
-                    filename = self.get_session_filename("temp_data", "json")
-                    with open(filename, 'w', encoding='utf-8') as f:
-                        json.dump([dict(zip(self.app.data_columns, row)) for row in self.data], f, indent=2)
-                    self.app.export_manager.mark_exported('json')
-                    
-            elif format_type == 'plot':
-                if self.app.export_manager.check_overwrite('plot'):
-                    plot_formats = plot_formats or ['png', 'pdf']
-                    filename_base = self.get_session_filename("temp_plot", "")
-                    for fmt in plot_formats:
-                        if fmt == 'png':
-                            filename = filename_base.replace('.','') + '.png' # Levesszük a felesleges pontokat
-                            self._save_plots(filename, None, fmt='png')
-                            self.app.log_to_display(f"Plot exported to {filename}\n")
-                        elif fmt == 'pdf':
-                            filename = filename_base.replace('.','') + '.pdf' # Levesszük a felesleges pontokat
-                            self._save_plots(None, filename, fmt='pdf')
-                            self.app.log_to_display(f"Plot exported to {filename}\n")
-                    self.app.export_manager.mark_exported('plot')
-                    
-            else:
-                return
-                
-            if format_type != 'plot':
-                self.app.log_to_display(f"Data exported to {filename}\n")
-                
-        except Exception as e:
-            self.app.error_handler("Error", f"Export failed: {str(e)}")
+    def reset_session(self):
+        """Reset internal data structures after logging and export."""
+        self.data = []
+        # Az aktuális munkamappát megtartjuk, ha meg akarják nyitni
+        self.session_start_time = None
+        self.session_end_time = None
+        self.app.data_columns = ["Type", "Seconds", "Timestamp"] 
+        self.app.gui.update_log_treeview_columns([])
 
-    def _save_excel_with_chart(self, filename: str):
-        """Save Excel file with embedded chart."""
+    def log_data_point(self, log_entry: List[Any]):
+        """Append a new data point to the internal list and optionally to the file."""
+        with self.lock:
+            # Add to internal data list
+            self.data.append(log_entry)
+            
+            # Check max log lines limit for display (not logging, as per user request)
+            if len(self.data) > self.app.max_log_lines * 2: # Keep some buffer
+                self.data = self.data[-self.app.max_log_lines:] 
+
+            # Write to raw JSON log file
+            if self.app.log_file:
+                json_data = {
+                    "Type": log_entry[0],
+                    "Seconds": log_entry[1],
+                    "Timestamp": log_entry[2],
+                    "Data": {self.app.data_columns[i]: log_entry[i] for i in range(3, len(log_entry))}
+                }
+                # log_entry[3:]-ban vannak a szenzor adatok
+                self.app.log_file.write(json.dumps(json_data) + "\n")
+                self.app.log_file.flush()
+
+    def check_conditions(self, conditions: List[Dict[str, Any]], current_temps: Dict[str, Optional[float]]) -> bool:
+        """Check if any of the given conditions are met."""
+        if not conditions:
+            return False
+
+        results = []
+        for cond in conditions:
+            is_met = any(evaluate_operator(current_temps.get(sid), cond['threshold'], cond['operator'])
+                         for sid in cond['sensors'])
+            results.append(is_met)
+
+        if not results:
+            return False
+
+        # Ha csak egy feltétel van
+        if len(results) == 1:
+            return results[0]
+
+        # Ha több feltétel van, a logikai operátor határozza meg
+        final_result = results[0]
+        for i in range(len(results) - 1):
+            cond = conditions[i]
+            next_result = results[i + 1]
+            logic = cond.get('logic', 'AND') # feltételezünk AND-et, ha nincs megadva
+
+            if logic == 'OR':
+                final_result = final_result or next_result
+            else: # AND
+                final_result = final_result and next_result
+        
+        return final_result
+
+    def export_data(self):
+        """Export data to CSV, Excel, and generate plots."""
+        if not self.data:
+            self.app.log_to_display("Export skipped: No data logged in this session.\n")
+            return
+
+        if not self.app.generate_output_var.get():
+            self.app.log_to_display("Export skipped: Output generation disabled.\n")
+            return
+            
+        self.app.log_to_display(f"Exporting data to: {self.current_session_folder}\n")
+        
+        base_name = os.path.basename(self.current_session_folder)
+        base_path = os.path.join(self.current_session_folder, base_name)
+        
+        # 1. Alap adatkeret létrehozása
         df = pd.DataFrame(self.data, columns=self.app.data_columns)
         
-        with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
-            df.to_excel(writer, sheet_name='Data', index=False)
-            
-            workbook = writer.book
-            worksheet = writer.sheets['Data']
-            
-            # Create chart
-            chart = workbook.add_chart({'type': 'line'})
-            
-            # Add series for each temperature column
-            for i, col in enumerate(self.app.data_columns[3:], 3):  # Skip Type, Seconds, Timestamp
+        # Átalakítjuk a szenzor oszlopokat, hogy a "None" értékek helyett NaN legyen a plotoláshoz
+        for col in self.app.data_columns[3:]:
+            # Az oszlop adatait megpróbáljuk float-ra konvertálni, a None/Inactive értékeket kihagyva
+            df[col] = pd.to_numeric(df[col], errors='coerce') 
+
+        # 2. Export Excelbe
+        excel_path = f"{base_path}.xlsx"
+        self.app.log_to_display(f"-> Generating Excel: {excel_path}\n")
+        self._save_to_excel(df, excel_path)
+        
+        # 3. Export CSV-be
+        csv_path = f"{base_path}.csv"
+        self.app.log_to_display(f"-> Generating CSV: {csv_path}\n")
+        df.to_csv(csv_path, index=False)
+        
+        # 4. Plotok generálása
+        self.app.log_to_display("-> Generating plots (PNG, PDF)...\n")
+        self._save_plots(filename_png=f"{base_path}.png", filename_pdf=f"{base_path}.pdf")
+        
+        self.app.log_to_display("Export process finished.\n")
+
+    def _save_to_excel(self, df: pd.DataFrame, file_path: str):
+        """Save dataframe to Excel and add a chart."""
+        # Workbook és sheets létrehozása
+        writer = pd.ExcelWriter(file_path, engine='xlsxwriter')
+        df.to_excel(writer, sheet_name='Data', index=False)
+        
+        workbook = writer.book
+        worksheet = writer.sheets['Data']
+        
+        # Oszlop szélesség beállítása
+        for i, col in enumerate(df.columns):
+            max_len = max(df[col].astype(str).str.len().max(), len(col)) + 2
+            worksheet.set_column(i, i, max_len)
+
+        # Grafikon hozzáadása (XY scatter/line chart)
+        chart = workbook.add_chart({'type': 'scatter'})
+        
+        # Add series for each temperature column
+        # df.columns.get_loc("Seconds") a másodperc oszlop
+        seconds_col_num = df.columns.get_loc("Seconds") + 1 # Excel oszlop index (1-től indul)
+        
+        # Hőmérséklet oszlopok: [3:]-tól indulnak az oszlopnevek a self.app.data_columns-ban
+        for i, col in enumerate(self.app.data_columns[3:], 3):  
+            # Ellenőrizzük, hogy az oszlop létezik a DataFrame-ben (a DataProcessor kezeli a lehetséges különbségeket)
+            if col in df.columns:
+                col_num = df.columns.get_loc(col) + 1 # Excel oszlop index
+                
+                # A kategóriák (X tengely) a 'Seconds' oszlop adatai
+                # A 'Data' sheet, a kategóriák 2. sortól (index 1) a másodperc oszlop 2. oszlopától (index 1) indulnak
+                # Categories: ['SheetName', start_row, start_col, end_row, end_col]
+                # Values: ['SheetName', start_row, start_col, end_row, end_col]
                 chart.add_series({
-                    'name': col,
-                    'categories': ['Data', 1, 1, len(df), 1],  # Seconds column
-                    'values': ['Data', 1, i, len(df), i],
+                    'name': f'=\'Data\'!${chr(65 + col_num - 1)}$1', # pl. ='Data'!$D$1
+                    'categories': ['Data', 1, seconds_col_num - 1, len(df), seconds_col_num - 1],  # Seconds oszlop (pl. C oszlop, 2. sortól)
+                    'values': ['Data', 1, col_num - 1, len(df), col_num - 1], # Az aktuális hőmérséklet oszlop
                 })
-            
-            chart.set_title({'name': 'Temperature Measurements'})
-            chart.set_x_axis({'name': 'Time (seconds)'})
-            chart.set_y_axis({'name': 'Temperature (°C)'})
-            
-            worksheet.insert_chart('F2', chart)
+        
+        chart.set_title({'name': 'Temperature Measurements'})
+        chart.set_x_axis({'name': 'Time (seconds)'})
+        chart.set_y_axis({'name': 'Temperature (°C)'})
+        
+        # A grafikon beszúrása, például F2 cellába
+        worksheet.insert_chart('F2', chart)
+
+        # Workbook lezárása
+        try:
+            writer.close()
+        except Exception as e:
+            self.app.log_to_display(f"Error closing Excel writer: {e}\n")
+
 
     def _save_plots(self, filename_png: str = None, filename_pdf: str = None, fmt: str = 'png'):
         """Save plots as PNG and/or PDF."""
         df = pd.DataFrame(self.data, columns=self.app.data_columns)
         plt.figure(figsize=(10, 6))
+        
         for col in self.app.data_columns[3:]:  # Skip Type, Seconds, Timestamp
             # Az oszlop adatait megpróbáljuk float-ra konvertálni, a None/Inactive értékeket kihagyva
             df[col] = pd.to_numeric(df[col], errors='coerce') 
             if col in df.columns:
+                # Azok a sorok, ahol van adat
                 valid_data = df.dropna(subset=[col])
                 if not valid_data.empty:
                     plt.plot(valid_data['Seconds'], valid_data[col], label=col)
@@ -277,8 +246,11 @@ class DataProcessor:
         plt.title("Temperature Logs")
         plt.legend()
         plt.grid(True)
+        
+        # MENTÉS
         if filename_png:
             plt.savefig(filename_png, format='png')
         if filename_pdf:
             plt.savefig(filename_pdf, format='pdf')
+            
         plt.close()
