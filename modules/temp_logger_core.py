@@ -9,6 +9,7 @@ import threading
 import time
 import os
 import json
+import re # Hozzáadva a mappanevek regex alapú kereséséhez
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 import subprocess # Hozzáadva a mappa megnyitásához
@@ -289,12 +290,48 @@ class TempLoggerApp:
         self.data_processor.reset_session()
         self.log_to_display("Data export complete. GUI is now ready for a new measurement.\n")
 
-    def open_last_measurement_folder(self):
-        """Opens the folder of the most recently finished measurement session."""
-        folder_path = self.data_processor.current_session_folder
+    def _find_last_measurement_folder(self):
+        """
+        Megkeresi a mérési mappák között a legmagasabb AT:x számlálóval rendelkező mappát.
+        """
+        base_dir = self.measurement_folder 
         
-        if not folder_path or not os.path.isdir(folder_path):
-            messagebox.showinfo("Open Folder", "No measurement session has been completed yet or folder not found.")
+        if not os.path.isdir(base_dir):
+            return None
+            
+        folders = os.listdir(base_dir)
+        last_counter = -1
+        last_folder_name = None
+        
+        # Minta: AT:XXXX_valami_uuid
+        # A 4 jegyű számláló (XXXX) kinyerése
+        pattern = re.compile(r"AT:(\d{4})_.*") 
+        
+        for folder in folders:
+            match = pattern.match(folder)
+            if match:
+                try:
+                    counter = int(match.group(1))
+                    
+                    if counter > last_counter:
+                        last_counter = counter
+                        last_folder_name = folder
+                except ValueError:
+                    # Ez akkor fordul elő, ha a (\d{4}) nem konvertálható számmá, de a regex ezt kezeli
+                    continue
+        
+        if last_folder_name:
+            return os.path.join(base_dir, last_folder_name)
+        return None
+
+
+    def open_last_measurement_folder(self):
+        """Opens the folder of the most recently finished measurement session (highest AT:x)."""
+        # Megpróbáljuk megkeresni a legnagyobb számlálójú mappát
+        folder_path = self._find_last_measurement_folder()
+        
+        if not folder_path:
+            messagebox.showinfo("Open Folder", "No measurement session folder found.")
             return
 
         self.log_to_display(f"Opening folder: {folder_path}\n")
@@ -305,6 +342,8 @@ class TempLoggerApp:
             elif os.uname().sysname == 'Darwin':  # macOS
                 subprocess.Popen(['open', folder_path])
             else:  # Linux (Gnome/KDE/etc.)
+                # Ha futtatod a programot RPI-n (ahol a 'pi' felhasználó fut), 
+                # a 'xdg-open' a leggyakoribb parancs.
                 subprocess.Popen(['xdg-open', folder_path])
         except Exception as e:
             self.error_handler("Folder Error", f"Could not open folder: {e}")
@@ -337,7 +376,7 @@ class TempLoggerApp:
             
             self.data_processor.log_data_point(log_data)
             
-            # JAVÍTÁS: A Treeview frissítése CSAK itt történik meg, amikor új adat lett logolva.
+            # A Treeview frissítése CSAK itt történik meg, amikor új adat lett logolva.
             temperatures_for_treeview = log_data[3:] # Kihagyjuk a Type, Seconds, Timestamp mezőket
             self.log_to_treeview(seconds_elapsed, temperatures_for_treeview)
 
@@ -378,8 +417,6 @@ class TempLoggerApp:
                 else:
                     label.config(text="N/A")
             
-            # FONTOS: A Treeview frissítése innentől a _log_loop-ban történik!
-
         except Exception as e:
             self.error_handler("GUI Update Error", f"Live GUI update failed: {str(e)}")
             
@@ -390,8 +427,6 @@ class TempLoggerApp:
             view_interval_sec = self.default_view_interval
             
         self.view_timer = self.root.after(int(view_interval_sec * 1000), self._update_gui_live)
-
-    # ... save_config, load_config, _convert_legacy_thresholds, on_closing, error_handler methods...
 
     def save_config(self):
         pass # Placeholder
