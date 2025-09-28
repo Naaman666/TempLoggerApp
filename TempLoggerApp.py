@@ -9,5 +9,4 @@ from modules.temp_logger_core import TempLoggerApp  # Assuming flat structure; c
 if __name__ == "__main__":
     root = tk.Tk()
     app = TempLoggerApp(root)
-    app.update_loop()
     root.mainloop()
