@@ -5,7 +5,7 @@ GUI builder for Temperature Logger application.
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 
 # Type Hinting for better development experience (avoiding circular imports at runtime)
 if TYPE_CHECKING:
@@ -123,7 +123,6 @@ class GUIBuilder:
         header_start.grid(row=0, column=0, sticky='EW')
         header_start.grid_columnconfigure(0, weight=1)
         
-        # JAVÍTVA: Csak a TempLoggerApp-ban inicializált változóra hivatkozunk
         self.start_enable_check = ttk.Checkbutton(header_start, text="Enable Start Conditions", 
                                                 variable=self.app.temp_start_enabled, command=lambda: self.app.update_conditions_list('start'))
         self.start_enable_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
@@ -145,7 +144,6 @@ class GUIBuilder:
         header_stop.grid(row=0, column=0, sticky='EW')
         header_stop.grid_columnconfigure(0, weight=1)
 
-        # JAVÍTVA: Csak a TempLoggerApp-ban inicializált változóra hivatkozunk
         self.stop_enable_check = ttk.Checkbutton(header_stop, text="Enable Stop Conditions", 
                                                variable=self.app.temp_stop_enabled, command=lambda: self.app.update_conditions_list('stop'))
         self.stop_enable_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
@@ -343,7 +341,7 @@ class GUIBuilder:
             self.create_tooltip(frame, "Warning: Select at least 1 sensor!")
         else:
             frame.config(relief='flat', borderwidth=0)
-            # JAVÍTVA: A Tooltip explicit törlése eltávolítva a kód egyszerűsítése érdekében.
+            # A Tooltip explicit törlése eltávolítva a kód egyszerűsítése érdekében.
             pass
 
     def update_log_treeview_columns(self, sensor_names: Dict[str, str]):
