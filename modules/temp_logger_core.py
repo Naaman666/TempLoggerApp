@@ -50,6 +50,18 @@ class TempLoggerApp:
         self.data_columns = []
         self.lock = threading.Lock()
         self.loaded_config = None
+        self.temp_control_enabled = tk.BooleanVar(value=False)
+        self.measure_duration_sec = None
+        self.duration_enabled = tk.BooleanVar(value=False)
+        self.duration_minutes = tk.StringVar(value="0")
+        self.duration_hours = tk.StringVar(value="0")
+        self.duration_days = tk.StringVar(value="0")
+        self.generate_output_var = tk.BooleanVar(value=True)
+        self.log_interval = tk.StringVar(value=str(self.default_log_interval))
+        self.view_interval = tk.StringVar(value=str(self.default_view_interval))
+        self.start_threshold = tk.StringVar(value=str(self.default_start_threshold))
+        self.stop_threshold = tk.StringVar(value=str(self.default_stop_threshold))
+        self.measurement_name = tk.StringVar(value="temptestlog")
 
         # Initialize sensors after GUI is ready
         self.root.after(100, self.initialize_sensors)
@@ -175,221 +187,102 @@ class TempLoggerApp:
         if self.running_event.is_set():
             self.error_handler("Warning", "Logging already in progress!")
             return
-        
-        # Validate duration
+
+        # Validate inputs before starting
         if not self.validate_duration():
             return
-        
-        # Reset session counter before creating new session
-        self.data_processor.reset_session()
-        
-        # Create session folder and clear previous data
-        session_folder = self.data_processor.create_session_folder()
-        with self.data_processor.lock:
-            self.data_processor.data.clear()
-        
-        # Clear Treeview
-        if hasattr(self, 'log_tree'):
-            for item in self.log_tree.get_children():
-                self.log_tree.delete(item)
-        
-        self.running_event.set()
+        if self.temp_control_enabled.get():
+            if not self.validate_float(self.start_threshold.get(), 'start_threshold') or \
+               not self.validate_float(self.stop_threshold.get(), 'stop_threshold'):
+                return
+
+        # Create session folder
+        self.data_processor.create_session_folder()
         self.session_start_time = time.time()
-        self.gui.start_button.config(state="disabled")
-        self.gui.stop_button.config(state="normal")
-        self.gui.excel_button.config(state="disabled")
-        self.gui.csv_button.config(state="disabled")
-        self.gui.json_button.config(state="normal")
+        self.running_event.set()
 
-        # Open log file in session folder
-        log_filename = self.data_processor.get_session_filename("temp_log", "log")
-        try:
-            self.log_file = open(log_filename, "w", encoding='utf-8')
-            self.log_to_display("Logging started...\n")
-            self.log_to_display(f"Session folder: {session_folder}\n")
-            self.log_to_display(f"Log file: {os.path.basename(log_filename)}\n")
-        except Exception as e:
-            self.error_handler("Error", f"Failed to open log file: {str(e)}")
-            self.running_event.clear()
-            self.gui.start_button.config(state="normal")
-            self.gui.stop_button.config(state="disabled")
-            return
+        # Update buttons
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
 
-        # Schedule first timers
-        self.schedule_view_update()
-        self.schedule_log_update()
-        
-        # Start progress update if duration is set
-        if self.measure_duration_sec is not None and self.duration_enabled.get():
-            self.measure_start_time = time.time()
-            self.root.after(1000, self.update_progress, time.time())
+        # Start timers
+        log_interval = int(self.log_interval.get())
+        view_interval = int(self.view_interval.get())
 
-        # Start condition checking
+        def log_loop():
+            while self.running_event.is_set():
+                with self.lock:
+                    temps_dict = self.sensor_manager.read_sensors()
+                    temperatures = [temps_dict.get(sid) for sid in self.sensor_manager.sensor_ids]
+                    elapsed = time.time() - self.session_start_time
+                    self.data_processor.data.append([self.data_processor.session_start_time, elapsed, datetime.now().isoformat()] + temperatures)
+                    self.log_to_treeview(elapsed, temperatures)
+                time.sleep(log_interval)
+
+        def view_loop():
+            while self.running_event.is_set():
+                self.sensor_manager.update_temperature_display(self.sensor_manager.read_sensors())
+                if self.measure_duration_sec:
+                    self.update_progress(time.time())
+                time.sleep(view_interval)
+
+        self.log_timer = threading.Thread(target=log_loop, daemon=True)
+        self.view_timer = threading.Thread(target=view_loop, daemon=True)
+        self.log_timer.start()
+        self.view_timer.start()
+
+        self.log_to_display("Logging started\n")
         self.update_loop()
 
     def stop_logging(self):
         """Stop the logging process."""
+        if not self.running_event.is_set():
+            return
+
         self.running_event.clear()
-        if self.view_timer:
-            self.view_timer.cancel()
+
+        # Wait for timers to finish current cycle (optional, but safe)
         if self.log_timer:
-            self.log_timer.cancel()
-            
-        # Finalize session folder with end timestamp
-        self.data_processor.session_end_time = datetime.now()
+            self.log_timer.join(timeout=1)
+        if self.view_timer:
+            self.view_timer.join(timeout=1)
+
+        # Finalize session
         self.data_processor.finalize_session_folder()
-            
-        self.gui.start_button.config(state="normal")
-        self.gui.stop_button.config(state="disabled")
-        self.gui.excel_button.config(state="normal")
-        self.gui.csv_button.config(state="normal")
-        self.gui.json_button.config(state="normal")
-        
-        if self.log_file:
-            try:
-                self.log_file.close()
-            except Exception as e:
-                self.error_handler("Error", f"Failed to close log file: {str(e)}")
-            self.log_file = None
-        
-        # Hide progress bar
-        self.progress_bar.pack_forget()
-        self.progress_label.pack_forget()
 
-        # Generate plots if checkbox is checked and we have data
+        # Update buttons
+        self.start_button.config(state="normal")
+        self.stop_button.config(state="disabled")
+
+        # Generate output if enabled
         if self.generate_output_var.get():
-            if self.data_processor.data:
-                self.data_processor.save_data('plot')
-                self.log_to_display("Plots generated successfully:\n")
-                self.log_to_display(f"Session folder: {self.data_processor.current_session_folder}\n")
-                plot_files = [
-                    "temp_plot-[AT:{self.data_processor.session_counter}]-...png",
-                    "temp_plot-[AT:{self.data_processor.session_counter}]-...pdf", 
-                    "temp_chart-[AT:{self.data_processor.session_counter}]-...xlsx"
-                ]
-                for file in plot_files:
-                    self.log_to_display(f"- {file}\n")
-            else:
-                self.log_to_display("No data collected, skipping plot generation\n")
+            self.data_processor.save_data('plot')
+            self.data_processor.save_data('excel')
 
-    def schedule_view_update(self):
-        if self.running_event.is_set():
-            self.view_timer = threading.Timer(int(self.view_interval.get()), self.view_update)
-            self.view_timer.start()
+        # Always save log (as CSV for simplicity, but can be extended)
+        self.data_processor.save_data('csv')
 
-    def schedule_log_update(self):
-        if self.running_event.is_set():
-            self.log_timer = threading.Timer(int(self.log_interval.get()), self.log_update)
-            self.log_timer.start()
+        self.log_to_display("Logging stopped\n")
+        self.data_processor.reset_session()
 
-    def view_update(self):
-        """Update GUI view and collect data."""
-        if not self.running_event.is_set():
+    def update_progress(self, current_time):
+        """Update progress bar for duration-limited measurements."""
+        if not self.measure_duration_sec:
             return
-            
-        current_time = time.time()
-        elapsed_seconds = current_time - self.session_start_time
-        
-        with self.lock:
-            temps_dict = self.sensor_manager.read_sensors()
-        
-        # Update temperature displays
-        self.sensor_manager.update_temperature_display(temps_dict)
-        
-        # Convert temperatures to floats and prepare for display
-        temps_list = []
-        for sid in self.sensor_manager.sensor_ids:
-            temp = temps_dict.get(sid)
-            if temp is not None:
-                try:
-                    temps_list.append(float(temp))
-                except (ValueError, TypeError):
-                    temps_list.append(None)
-            else:
-                temps_list.append(None)
-        
-        # Add to Treeview
-        self.log_to_treeview(elapsed_seconds, temps_list)
-        
-        # Create data row and add to data list
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data_row = ["VIEW", elapsed_seconds, timestamp] + temps_list
-        with self.data_processor.lock:
-            self.data_processor.data.append(data_row)
-        
-        self.schedule_view_update()
 
-    def log_update(self):
-        """Log to file and collect data."""
-        if not self.running_event.is_set():
-            return
-            
-        current_time = time.time()
-        elapsed_seconds = current_time - self.session_start_time
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        with self.lock:
-            temps_dict = self.sensor_manager.read_sensors()
-        
-        # Convert temperatures to floats
-        temps_list = []
-        for sid in self.sensor_manager.sensor_ids:
-            temp = temps_dict.get(sid)
-            if temp is not None:
-                try:
-                    temps_list.append(float(temp))
-                except (ValueError, TypeError):
-                    temps_list.append(None)
-            else:
-                temps_list.append(None)
-        
-        # Create data row and add to data list
-        data_row = ["LOG", elapsed_seconds, timestamp] + temps_list
-        with self.data_processor.lock:
-            self.data_processor.data.append(data_row)
-        
-        # Write to log file
-        if self.log_file:
-            log_line = f"LOG,{elapsed_seconds},{timestamp}," + ",".join(
-                [f"{t:.1f}" if t is not None else "Inactive" for t in temps_list]
-            )
-            try:
-                self.log_file.write(log_line + "\n")
-                self.log_file.flush()
-            except Exception as e:
-                self.error_handler("Error", f"Failed to write to log file: {str(e)}")
-        
-        self.schedule_log_update()
+        elapsed = current_time - self.measure_start_time
+        progress = (elapsed / self.measure_duration_sec) * 100
+        remaining = self.measure_duration_sec - elapsed
+        end_time = datetime.fromtimestamp(current_time + remaining)
 
-    def save_data(self, format_type: str):
-        """Save data using DataProcessor."""
-        self.data_processor.save_data(format_type)
-
-    def update_progress(self, current_time: float):
-        """Update progress bar and label for timed measurements."""
-        if (self.measure_duration_sec is not None and 
-            self.measure_start_time is not None and
-            self.duration_enabled.get()):
-            
-            elapsed = current_time - self.measure_start_time
-            progress = (elapsed / self.measure_duration_sec) * 100
-            remaining_sec = max(0, self.measure_duration_sec - elapsed)
-            
-            hours, rem = divmod(int(remaining_sec), 3600)
-            minutes, seconds = divmod(rem, 60)
-            remaining_str = f"Remaining: {hours} hr {minutes} min {seconds} sec"
-            
-            end_time = datetime.fromtimestamp(self.measure_start_time + self.measure_duration_sec)
-            end_time_str = f"Expected completion: {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
-            
-            self.progress_bar['value'] = min(progress, 100)
-            self.progress_label['text'] = f"{remaining_str} | {end_time_str}"
-            self.progress_bar.pack(fill=tk.X, pady=2)
-            self.progress_label.pack(fill=tk.X, pady=2)
-        else:
-            self.progress_bar.pack_forget()
-            self.progress_label.pack_forget()
-            
+        remaining_str = format_duration(remaining)
+        end_time_str = f"Completion: {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        self.progress_bar['value'] = min(progress, 100)
+        self.progress_label['text'] = f"{remaining_str} | {end_time_str}"
+        self.progress_bar.pack(fill=tk.X, pady=2)
+        self.progress_label.pack(fill=tk.X, pady=2)
+        
         if self.running_event.is_set():
             self.root.after(1000, self.update_progress, time.time())
 
@@ -404,19 +297,20 @@ class TempLoggerApp:
             current_time = time.time()
             with self.lock:
                 temps_dict = self.sensor_manager.read_sensors()
+                avg_temp = sum(t for t in temps_dict.values() if t is not None) / len([t for t in temps_dict.values() if t is not None]) if any(t is not None for t in temps_dict.values()) else 0
 
             nonlocal measurement_started
-            if not measurement_started:
-                # Start condition checking would go here
-                # Placeholder for temperature-controlled start
-                measurement_started = True
-                self.measure_start_time = current_time
-                self.log_to_display("Measurement started\n")
+            if not measurement_started and self.temp_control_enabled.get():
+                if avg_temp >= float(self.start_threshold.get()):
+                    measurement_started = True
+                    self.measure_start_time = current_time
+                    self.log_to_display("Measurement started (temp threshold reached)\n")
 
             if measurement_started:
-                # Stop condition checking would go here
-                # Placeholder for temperature-controlled stop
-                pass
+                if self.temp_control_enabled.get() and avg_temp <= float(self.stop_threshold.get()):
+                    self.log_to_display("Measurement stopped (temp threshold reached)\n")
+                    self.stop_logging()
+                    return
 
                 # Stop on duration
                 if (self.measure_duration_sec is not None and 
@@ -431,6 +325,10 @@ class TempLoggerApp:
 
         # Start condition checking
         self.root.after(100, check_conditions)
+
+    def save_data(self, format_type: str):
+        """Save data to file in the specified format."""
+        self.data_processor.save_data(format_type)
 
     def save_sensor_config(self):
         """Save sensor configuration to a JSON file."""
@@ -456,7 +354,8 @@ class TempLoggerApp:
                 "duration_minutes": float(self.duration_minutes.get()),
                 "duration_hours": float(self.duration_hours.get()),
                 "duration_days": float(self.duration_days.get()),
-                "measurement_name": self.measurement_name.get()
+                "measurement_name": self.measurement_name.get(),
+                "temp_control_enabled": self.temp_control_enabled.get()
             }
             
             with open(filename, "w", encoding='utf-8') as f:
@@ -495,6 +394,7 @@ class TempLoggerApp:
             self.duration_hours.set(str(loaded_config.get("duration_hours", 0)))
             self.duration_days.set(str(loaded_config.get("duration_days", 0)))
             self.measurement_name.set(loaded_config.get("measurement_name", "temptestlog"))
+            self.temp_control_enabled.set(loaded_config.get("temp_control_enabled", False))
             
             # Update sensor displays
             for sid, chk in self.sensor_manager.sensor_checkbuttons.items():
