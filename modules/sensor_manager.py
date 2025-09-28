@@ -33,9 +33,10 @@ class SensorManager:
             self.sensors = W1ThermSensor.get_available_sensors()
             self.sensor_ids = [s.id for s in self.sensors]
             
-            # Clear sensor frame
-            for widget in self.app.sensor_frame.winfo_children():
-                widget.destroy()
+            # Clear sensor frame if exists
+            if hasattr(self.app, 'sensor_frame') and self.app.sensor_frame:
+                for widget in self.app.sensor_frame.winfo_children():
+                    widget.destroy()
             self.sensor_vars.clear()
             self.sensor_checkbuttons.clear()
             self.sensor_labels.clear()
@@ -50,7 +51,7 @@ class SensorManager:
                     self.ambient_sensor_id = sensor_id
                     self.sensor_names[sensor_id] = "Sensor-25 (Ambient)"
 
-            # Create grid
+            # Create grid dynamically
             self._create_sensor_grid()
             
             self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
@@ -65,30 +66,37 @@ class SensorManager:
             self.app.error_handler("Error", f"Sensor init failed: {str(e)}")
 
     def _create_sensor_grid(self):
-        """Create 3-column sensor grid."""
-        max_sensors = 24
-        
+        """Create dynamic sensor grid."""
+        num_sensors = len(self.sensors)
         row_offset = 1 if self.ambient_sensor_id else 0
+        sensor_index = 1  # Global index for numbering
         
         if self.ambient_sensor_id:
-            self._create_sensor_row(self.ambient_sensor_id, 0, 0, is_ambient=True)
+            ambient_index = self.sensors.index(next(s for s in self.sensors if s.id == self.ambient_sensor_id))
+            self._create_sensor_row(self.ambient_sensor_id, 0, 0, sensor_index, is_ambient=True)
+            sensor_index += 1
         
-        for i in range(max_sensors):
-            if i < len(self.sensors) and self.sensors[i].id != self.ambient_sensor_id:
-                row = (i // 3) + row_offset
-                col = (i % 3) * 3
+        for i in range(num_sensors):
+            if self.sensors[i].id != self.ambient_sensor_id:
+                row = (i // 3) + row_offset if not self.ambient_sensor_id or i < ambient_index else ((i - 1) // 3) + row_offset
+                col = (i % 3) * 3 if not self.ambient_sensor_id or i < ambient_index else ((i - 1) % 3) * 3
                 sensor_id = self.sensors[i].id
-                self._create_sensor_row(sensor_id, row, col)
+                self._create_sensor_row(sensor_id, row, col, sensor_index)
+                sensor_index += 1
             else:
-                row = (i // 3) + row_offset
-                col = (i % 3) * 3
-                self._create_empty_slot(row, col, i + 1)
+                continue  # Ambient already handled
 
-    def _create_sensor_row(self, sensor_id: str, row: int, col: int, is_ambient: bool = False):
+        # Fill empty slots if less than max (optional, for fixed layout)
+        max_sensors = 25
+        while sensor_index <= max_sensors:
+            row = ((sensor_index - 1) // 3) + row_offset
+            col = ((sensor_index - 1) % 3) * 3
+            self._create_empty_slot(row, col, sensor_index)
+            sensor_index += 1
+
+    def _create_sensor_row(self, sensor_id: str, row: int, col: int, sensor_index: int, is_ambient: bool = False):
         """Create sensor row."""
-        sensor_num = int(sensor_id) if sensor_id.isdigit() else 0
-        
-        num_label = ttk.Label(self.app.sensor_frame, text=f"{sensor_num}.")
+        num_label = ttk.Label(self.app.sensor_frame, text=f"{sensor_index}.")
         num_label.grid(row=row, column=col, padx=2, pady=1, sticky='W')
         
         var = tk.BooleanVar(value=True)
@@ -158,7 +166,7 @@ class SensorManager:
             color = "green" if is_active else "red"
             
             current_text = self.temp_labels[sensor_id].cget("text")
-            temp_part = current_text.split(" ")[-1] if "°C" in current_text else "--.--°C"
+            temp_part = current_text.split(" ")[-1] if "°C" in current_text else "--°C"
             
             self.temp_labels[sensor_id].config(text=f"{status} {temp_part}", foreground=color)
 
@@ -170,7 +178,10 @@ class SensorManager:
                 status = "Active" if is_active else "Inactive"
                 color = "green" if is_active else "red"
                 
-                temp_str = f"{temp:.1f}°C" if temp is not None else "--.--°C"
+                if not is_active:
+                    temp_str = "--°C"
+                else:
+                    temp_str = f"{temp:.1f}°C" if temp is not None else "--.--°C"
                 
                 self.temp_labels[sensor_id].config(text=f"{status} {temp_str}", foreground=color)
 
@@ -199,24 +210,25 @@ class SensorManager:
     @retry()
     def read_sensors(self) -> Dict[str, Optional[float]]:
         """Read all active sensors - full readout, no downsampling."""
-        temps = {}
+        temps = {sid: None for sid in self.sensor_ids}
         for sensor in self.sensors:
-            if self.sensor_vars.get(sensor.id, tk.BooleanVar(value=False)).get():
+            sensor_id = sensor.id
+            if self.sensor_vars.get(sensor_id, tk.BooleanVar(value=False)).get():
                 try:
-                    temps[sensor.id] = sensor.get_temperature()
+                    temps[sensor_id] = sensor.get_temperature()
                 except SensorNotReadyError:
-                    temps[sensor.id] = None
-            else:
-                temps[sensor.id] = None
+                    temps[sensor_id] = None
+            # Inactive already None
         return temps
 
     def rename_sensor(self, sensor_id: str):
         """Rename sensor."""
         new_name = simpledialog.askstring("Rename Sensor", f"New name for {self.sensor_names[sensor_id]}:", initialvalue=self.sensor_names[sensor_id])
         if new_name and new_name.strip():
-            self.sensor_names[sensor_id] = sanitize_filename(new_name)
-            if sensor_id in self.sensor_checkbuttons:
-                self.sensor_checkbuttons[sensor_id].config(text=self.sensor_names[sensor_id])
-            # Update app data_columns if needed
-            self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
-            self.app.gui.update_log_treeview_columns(self.sensor_names)
+            with self.app.lock:
+                self.sensor_names[sensor_id] = sanitize_filename(new_name)
+                if sensor_id in self.sensor_checkbuttons:
+                    self.sensor_checkbuttons[sensor_id].config(text=self.sensor_names[sensor_id])
+                # Update app data_columns if needed
+                self.app.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_names[sid] for sid in self.sensor_ids]
+                self.app.gui.update_log_treeview_columns(self.sensor_names)
