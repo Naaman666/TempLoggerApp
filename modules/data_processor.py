@@ -11,12 +11,12 @@ import os
 import threading
 import atexit
 from datetime import datetime
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Dict, Any, Optional
 
 if TYPE_CHECKING:
     from .temp_logger_core import TempLoggerApp  # Adjust if needed
 
-from .helpers import get_next_counter, generate_short_uuid, sanitize_filename, format_duration
+from .helpers import get_next_counter, generate_short_uuid, sanitize_filename, format_duration, evaluate_operator
 
 class DataProcessor:
     """Handles data logging, limiting, and exporting."""
@@ -31,8 +31,69 @@ class DataProcessor:
         self.session_start_time = None
         self.session_end_time = None
         self.temp_session_folder = None
-        # Register cleanup
+        # Register cleanup to handle app closure
         atexit.register(self.finalize_session_folder)
+
+    def get_total_duration_seconds(self) -> Optional[int]:
+        """Calculate the total logging duration in seconds."""
+        try:
+            days = int(self.app.duration_days.get())
+            hours = int(self.app.duration_hours.get())
+            minutes = int(self.app.duration_minutes.get())
+            return days * 86400 + hours * 3600 + minutes * 60
+        except ValueError:
+            self.app.log_to_display("Warning: Invalid duration input. Duration limit ignored.\n")
+            return None
+
+    def log_data_point(self, data_point: List):
+        """Add a data point to the internal list and update the display."""
+        with self.lock:
+            self.data.append(data_point)
+        
+        # [0]=Type, [1]=Seconds, [2]=Timestamp, [3:]=Temps
+        temps_only = [data_point[i] for i in range(3, len(data_point))]
+        self.app.log_to_treeview(data_point[1], temps_only)
+
+    def get_all_logged_data(self) -> List[List]:
+        """Return a copy of all logged data."""
+        with self.lock:
+            return list(self.data)
+
+    def check_conditions(self, conditions: List[Dict[str, Any]]) -> bool:
+        """Check if any condition group is met based on the last reading."""
+        
+        last_temps = self.app.sensor_manager.get_last_readings()
+        
+        if not conditions:
+            return False
+        
+        results: List[bool] = []
+        
+        for condition in conditions:
+            sensors = condition.get('sensors', [])
+            operator = condition.get('operator', '>')
+            threshold = condition.get('threshold', 0.0)
+            logic = condition.get('logic')
+            
+            group_results: List[bool] = []
+            
+            for sid in sensors:
+                temp = last_temps.get(sid)
+                
+                if temp is not None:
+                    group_results.append(evaluate_operator(temp, threshold, operator))
+            
+            # Evaluate group logic
+            if not group_results:
+                continue # Skip condition if no sensors read valid data
+                
+            if logic == 'AND':
+                results.append(all(group_results))
+            elif logic == 'OR' or logic is None: # Treat None as OR/Single
+                results.append(any(group_results))
+                
+        # Final check: if any of the evaluated condition groups are TRUE, the overall condition is met.
+        return any(results)
 
     def create_session_folder(self) -> str:
         """Create a temporary session folder, final name set at stop."""
@@ -54,11 +115,24 @@ class DataProcessor:
 
     def finalize_session_folder(self):
         """Rename folder with end timestamp."""
-        if not self.session_end_time and self.session_start_time:
+        # Check if a session was actually started (session_start_time is not None)
+        if not self.session_start_time:
+            if self.temp_session_folder and os.path.exists(self.temp_session_folder):
+                 # Try to remove the empty temp folder if it exists
+                 try:
+                     os.rmdir(self.temp_session_folder)
+                 except OSError:
+                     pass # Folder was not empty, leave it for manual check
+            self.temp_session_folder = None
+            self.current_session_folder = None
+            return 
+            
+        # Set end time if it was not set during a normal stop
+        if not self.session_end_time:
             self.session_end_time = datetime.now()
             
         start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S")
-        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_end_time else start_timestamp
+        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S")
         base_name = sanitize_filename(self.app.measurement_name.get())
         
         final_folder_name = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}]"
@@ -67,6 +141,20 @@ class DataProcessor:
         if self.temp_session_folder and os.path.exists(self.temp_session_folder):
             os.rename(self.temp_session_folder, final_folder_path)
             self.current_session_folder = final_folder_path
+
+    def reset_session_data(self):
+        """Clear the logged data."""
+        with self.lock:
+            self.data.clear()
+
+    def reset_session_times(self):
+        """Reset session metadata (used after finalize)."""
+        self.session_counter = None
+        self.session_uuid = None
+        self.session_start_time = None
+        self.session_end_time = None
+        self.current_session_folder = None
+        self.temp_session_folder = None
 
     def get_session_filename(self, base_name: str, extension: str) -> str:
         """Generate filename for current session."""
@@ -79,18 +167,6 @@ class DataProcessor:
         base_name = sanitize_filename(base_name)
         filename = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}].{extension}"
         return os.path.join(self.current_session_folder, filename)
-
-    def reset_session(self):
-        """Reset session data for new measurement."""
-        self.session_counter = None
-        self.session_uuid = None
-        self.session_start_time = None
-        self.session_end_time = None
-        self.current_session_folder = None
-        self.temp_session_folder = None
-        with self.lock:
-            self.data.clear()
-        self.app.export_manager.reset_exports()
 
     def limit_log_lines(self):
         """Limit the number of lines in the log display."""
