@@ -1,6 +1,6 @@
 # Temperature Logger App - Required Dependencies
 # Install with: 
-# cd TempLoggerApp/
+# cd TempLoggerApp
 # pip install -r requirements.txt
 
 # Data handling and export
