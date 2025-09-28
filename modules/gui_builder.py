@@ -8,7 +8,7 @@ from tkinter import ttk, scrolledtext
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .temp_logger_app import TempLoggerApp
+    from .temp_logger_core import TempLoggerApp
 
 class GUIBuilder:
     """Handles GUI initialization and management."""
@@ -100,29 +100,44 @@ class GUIBuilder:
         self.duration_days_entry = ttk.Entry(duration_frame, textvariable=self.app.duration_days, width=5)
         self.duration_days_entry.grid(row=0, column=6, padx=5, pady=2, sticky='W')
 
-        # TEMPERATURE-CONTROLLED MEASUREMENT frame
+        # TEMPERATURE-CONTROLLED MEASUREMENT frame - NEW STRUCTURE
         temp_control_frame = ttk.LabelFrame(main_frame, text="Temperature-Controlled Measurement", padding=5)
-        temp_control_frame.pack(fill=tk.X, pady=5)
+        temp_control_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.app.temp_control_enabled = tk.BooleanVar(value=False)
-        temp_control_check = ttk.Checkbutton(temp_control_frame, text="Enable temperature-based start/stop", 
-                                           variable=self.app.temp_control_enabled)
-        temp_control_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
+        # START CONDITIONS BLOCK
+        start_block = ttk.LabelFrame(temp_control_frame, text="Start Conditions", padding=5)
+        start_block.pack(fill=tk.X, pady=2)
 
-        ttk.Label(temp_control_frame, text="Start threshold (°C):").grid(row=0, column=1, padx=5, pady=2, sticky='W')
-        self.app.start_threshold = tk.StringVar(value=str(self.app.default_start_threshold))
-        self.start_threshold_entry = ttk.Entry(temp_control_frame, textvariable=self.app.start_threshold, width=8)
-        self.start_threshold_entry.grid(row=0, column=2, padx=5, pady=2, sticky='W')
-        self.create_tooltip(self.start_threshold_entry, "Temperature above which measurement starts (if enabled).")
+        self.app.temp_start_enabled = tk.BooleanVar(value=False)
+        self.start_enable_check = ttk.Checkbutton(start_block, text="Enable temperature start",
+                                                  variable=self.app.temp_start_enabled,
+                                                  command=lambda: self.toggle_conditions_block('start'))
+        self.start_enable_check.pack(anchor='w')
 
-        ttk.Label(temp_control_frame, text="Stop threshold (°C):").grid(row=0, column=3, padx=5, pady=2, sticky='W')
-        self.app.stop_threshold = tk.StringVar(value=str(self.app.default_stop_threshold))
-        self.stop_threshold_entry = ttk.Entry(temp_control_frame, textvariable=self.app.stop_threshold, width=8)
-        self.stop_threshold_entry.grid(row=0, column=4, padx=5, pady=2, sticky='W')
-        self.create_tooltip(self.stop_threshold_entry, "Temperature below which measurement stops (if enabled). Must be > start threshold.")
+        self.start_scroll_frame = self._create_scrollable_frame(start_block)
+        self.start_conditions_rows = []  # List of row frames for management
+        self.start_add_button = ttk.Button(start_block, text="+ Add Condition",
+                                           command=lambda: self.add_condition_row('start'))
+        self.start_add_button.pack(anchor='w', pady=2)
 
-        # Sensor selection frame (assuming it's added elsewhere or after)
-        sensor_frame = ttk.LabelFrame(main_frame, text="Sensor Selection", padding=5)
+        # STOP CONDITIONS BLOCK
+        stop_block = ttk.LabelFrame(temp_control_frame, text="Stop Conditions", padding=5)
+        stop_block.pack(fill=tk.X, pady=2)
+
+        self.app.temp_stop_enabled = tk.BooleanVar(value=False)
+        self.stop_enable_check = ttk.Checkbutton(stop_block, text="Enable temperature stop",
+                                                 variable=self.app.temp_stop_enabled,
+                                                 command=lambda: self.toggle_conditions_block('stop'))
+        self.stop_enable_check.pack(anchor='w')
+
+        self.stop_scroll_frame = self._create_scrollable_frame(stop_block)
+        self.stop_conditions_rows = []  # List of row frames for management
+        self.stop_add_button = ttk.Button(stop_block, text="+ Add Condition",
+                                          command=lambda: self.add_condition_row('stop'))
+        self.stop_add_button.pack(anchor='w', pady=2)
+
+        # SENSOR FRAME (for checkboxes in conditions - populated after sensors init)
+        sensor_frame = ttk.LabelFrame(main_frame, text="Sensors", padding=5)
         sensor_frame.pack(fill=tk.X, pady=5)
         self.app.sensor_frame = sensor_frame  # Reference for sensor_manager
 
@@ -170,6 +185,187 @@ class GUIBuilder:
         self.app.progress_label.pack(fill=tk.X, pady=2)
         self.app.progress_bar.pack_forget()
         self.app.progress_label.pack_forget()
+
+        # Initially disable condition blocks
+        self.toggle_conditions_block('start')
+        self.toggle_conditions_block('stop')
+
+    def _create_scrollable_frame(self, parent):
+        """Create a scrollable frame using Canvas and Scrollbar."""
+        canvas = tk.Canvas(parent, height=150, bg='white')
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        return scrollable_frame
+
+    def toggle_conditions_block(self, side: str):
+        """Enable/disable the conditions block based on checkbox."""
+        if side == 'start':
+            state = tk.NORMAL if self.app.temp_start_enabled.get() else tk.DISABLED
+            for widget in self.start_scroll_frame.winfo_children():
+                widget.config(state=state)
+            self.start_add_button.config(state=state)
+        else:
+            state = tk.NORMAL if self.app.temp_stop_enabled.get() else tk.DISABLED
+            for widget in self.stop_scroll_frame.winfo_children():
+                widget.config(state=state)
+            self.stop_add_button.config(state=state)
+
+    def add_condition_row(self, side: str):
+        """Add a new condition row to the specified side."""
+        if side == 'start':
+            scroll_frame = self.start_scroll_frame
+            rows = self.start_conditions_rows
+            add_button = self.start_add_button
+        else:
+            scroll_frame = self.stop_scroll_frame
+            rows = self.stop_conditions_rows
+            add_button = self.stop_add_button
+
+        # Create new row frame
+        row_frame = ttk.Frame(scroll_frame, relief='solid', borderwidth=1)
+        row_frame.pack(fill=tk.X, padx=2, pady=2)
+
+        # Sensor select frame (checkboxes in 3 columns)
+        sensor_select_frame = ttk.LabelFrame(row_frame, text="Sensors", padding=2)
+        sensor_select_frame.pack(side=tk.LEFT, fill=tk.X, padx=2)
+        sensor_vars = {}  # Local vars for this row's checkboxes
+        for i, (sid, name) in enumerate(self.app.sensor_manager.sensor_names.items()):
+            if sid not in sensor_vars:
+                var = tk.BooleanVar(value=False)
+                sensor_vars[sid] = var
+            chk = ttk.Checkbutton(sensor_select_frame, text=name, variable=var,
+                                  command=lambda s=sid, r=row_frame: self.on_sensor_change(s, r, side))
+            col = i % 3
+            roww = i // 3
+            chk.grid(row=roww, column=col, sticky='w', padx=1)
+
+        # Selected count label
+        selected_label = ttk.Label(sensor_select_frame, text="Selected: 0")
+        selected_label.pack()
+
+        # Operator combobox
+        op_frame = ttk.Frame(row_frame)
+        op_frame.pack(side=tk.LEFT, padx=2)
+        ttk.Label(op_frame, text="Operator:").pack()
+        op_var = tk.StringVar(value='>')
+        op_combo = ttk.Combobox(op_frame, textvariable=op_var, values=['>', '<', '>=', '<=', '='], width=5,
+                                state='readonly', command=lambda v=op_var, r=row_frame: self.on_condition_change(r, side))
+        op_combo.pack()
+
+        # Threshold entry
+        thresh_frame = ttk.Frame(row_frame)
+        thresh_frame.pack(side=tk.LEFT, padx=2)
+        ttk.Label(thresh_frame, text="Threshold:").pack()
+        thresh_var = tk.StringVar(value='10.0')
+        thresh_entry = ttk.Entry(thresh_frame, textvariable=thresh_var, width=8,
+                                 validate='key', validatecommand=(self.root.register(lambda v: self.validate_float(v)), '%P'),
+                                 command=lambda r=row_frame: self.on_condition_change(r, side))
+        thresh_entry.pack()
+        ttk.Label(thresh_frame, text="°C").pack()
+
+        # Logic combobox (only if not first row)
+        is_first = len(rows) == 0
+        logic_frame = ttk.Frame(row_frame) if not is_first else None
+        if not is_first:
+            logic_frame.pack(side=tk.LEFT, padx=2)
+            ttk.Label(logic_frame, text="Logic:").pack()
+            logic_var = tk.StringVar(value='AND')
+            logic_combo = ttk.Combobox(logic_frame, textvariable=logic_var, values=['AND', 'OR'], width=5,
+                                       state='readonly', command=lambda r=row_frame: self.on_condition_change(r, side))
+            logic_combo.pack()
+
+        # Delete button
+        delete_btn = ttk.Button(row_frame, text='−', style='Danger.TButton', width=2,
+                                command=lambda r=row_frame: self.remove_condition_row(r, side))
+        delete_btn.pack(side=tk.RIGHT, padx=2)
+
+        # Store row data
+        row_data = {
+            'frame': row_frame,
+            'sensor_vars': sensor_vars,
+            'selected_label': selected_label,
+            'op_var': op_var,
+            'thresh_var': thresh_var,
+            'logic_var': logic_var if not is_first else None,
+            'is_first': is_first
+        }
+        rows.append(row_data)
+
+        # Update selected count initially
+        self.update_selected_count(row_data)
+
+        # Trigger update
+        self.on_condition_change(row_frame, side)
+
+        # Configure style for delete button (red)
+        style = ttk.Style()
+        style.configure('Danger.TButton', foreground='red')
+
+    def remove_condition_row(self, row_frame, side: str):
+        """Remove a condition row."""
+        if side == 'start':
+            rows = self.start_conditions_rows
+        else:
+            rows = self.stop_conditions_rows
+        for row_data in rows:
+            if row_data['frame'] == row_frame:
+                row_frame.destroy()
+                rows.remove(row_data)
+                self.on_condition_change(row_frame, side)  # Trigger full update
+                break
+
+    def on_sensor_change(self, sid: str, row_frame, side: str):
+        """Handle sensor checkbox change, update count and validation."""
+        if side == 'start':
+            rows = self.start_conditions_rows
+        else:
+            rows = self.stop_conditions_rows
+        for row_data in rows:
+            if row_data['frame'] == row_frame:
+                self.update_selected_count(row_data)
+                self.on_condition_change(row_frame, side)
+                break
+
+    def update_selected_count(self, row_data):
+        """Update the selected sensors count label."""
+        count = sum(1 for var in row_data['sensor_vars'].values() if var.get())
+        row_data['selected_label'].config(text=f"Selected: {count}")
+        # Highlight row if invalid (0 selected)
+        if count == 0:
+            row_data['frame'].config(relief='solid', borderwidth=1)  # Red border via style if needed
+            self.create_tooltip(row_data['frame'], "Warning: Select at least 1 sensor!")
+        else:
+            row_data['frame'].config(relief='flat', borderwidth=0)
+
+    def on_condition_change(self, row_frame, side: str):
+        """Handle any condition change, trigger app update."""
+        if side == 'start':
+            self.app.update_conditions_list('start')
+        else:
+            self.app.update_conditions_list('stop')
+        # Validate and warn if needed (app handles full validation)
+
+    def validate_float(self, value: str) -> bool:
+        """Validate float entry."""
+        if not value:
+            return True
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
 
     def _create_log_treeview(self, parent):
         """Create Treeview for tabular log display."""
@@ -246,3 +442,32 @@ class GUIBuilder:
 
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
+
+    def populate_condition_checkboxes(self):
+        """Repopulate sensor checkboxes in all condition rows after sensor init."""
+        # This would be called from app.initialize_sensors after sensor init
+        for side in ['start', 'stop']:
+            if side == 'start':
+                rows = self.start_conditions_rows
+            else:
+                rows = self.stop_conditions_rows
+            for row_data in rows:
+                # Clear existing checkboxes in sensor_select_frame
+                sensor_frame = row_data['frame'].winfo_children()[0]  # First is sensor_select_frame
+                for child in sensor_frame.winfo_children():
+                    if isinstance(child, ttk.Checkbutton):
+                        child.destroy()
+                # Repopulate
+                sensor_vars = row_data['sensor_vars']
+                sensor_vars.clear()
+                i = 0
+                for sid, name in self.app.sensor_manager.sensor_names.items():
+                    var = tk.BooleanVar(value=False)
+                    sensor_vars[sid] = var
+                    chk = ttk.Checkbutton(sensor_frame, text=name, variable=var,
+                                          command=lambda s=sid, r=row_data['frame']: self.on_sensor_change(s, r, side))
+                    col = i % 3
+                    roww = i // 3
+                    chk.grid(row=roww, column=col, sticky='w', padx=1)
+                    i += 1
+                self.update_selected_count(row_data)
