@@ -108,21 +108,51 @@ class TempLoggerApp:
                 values.append(f"{temp:.1f}")
         
         # Add to Treeview
-        self.log_tree.insert("", tk.END, values=values)
+        iid = self.log_tree.insert("", tk.END, values=values)
+        # Alternate row colors
+        row_index = len(self.log_tree.get_children())
+        tag = "evenrow" if row_index % 2 == 0 else "oddrow"
+        self.log_tree.item(iid, tags=(tag,))
         
         # Auto-scroll to bottom
         self.log_tree.see(self.log_tree.get_children()[-1])
 
     def update_conditions_list(self, side: str):
         """Update conditions list from GUI rows (called by GUI on change)."""
-        # Note: In full impl, this would parse GUI row_data, but for now, placeholder
-        # - GUI calls this to signal change; actual parsing can be in GUI or here
-        # Assuming GUI handles parsing and calls self.start_conditions = parsed_list
-        # For simplicity, validate after update
         if side == 'start':
-            self.validate_temp_conditions('start')
+            conditions = self.start_conditions
+            rows = self.gui.start_conditions_rows
         else:
-            self.validate_temp_conditions('stop')
+            conditions = self.stop_conditions
+            rows = self.gui.stop_conditions_rows
+        
+        parsed_conditions = []
+        for row_data in rows:
+            sensor_vars = row_data.get('sensor_vars', {})
+            selected_sensors = [sid for sid, var in sensor_vars.items() if var.get()]
+            threshold_str = row_data.get('threshold_entry', tk.StringVar(value="")).get()
+            operator = row_data.get('operator_combobox', tk.StringVar(value=">")).get()
+            
+            try:
+                threshold = float(threshold_str) if threshold_str else 0.0
+                if selected_sensors:
+                    cond = {
+                        'sensors': selected_sensors,
+                        'operator': operator,
+                        'threshold': threshold,
+                        'logic': None  # First level
+                    }
+                    parsed_conditions.append(cond)
+            except ValueError:
+                pass  # Invalid threshold, skip this row
+        
+        if side == 'start':
+            self.start_conditions = parsed_conditions
+        else:
+            self.stop_conditions = parsed_conditions
+        
+        # Validate after update
+        self.validate_temp_conditions(side)
 
     def validate_temp_conditions(self, side: str) -> bool:
         """Validate conditions list, show warning if invalid."""
@@ -153,244 +183,9 @@ class TempLoggerApp:
                 invalid_reasons.append(f"Condition {i+1}: No sensors selected")
         
         if invalid_reasons:
-            messagebox.showwarning("Warning", "Some conditions invalid:\n" + "\n".join(invalid_reasons) + "\nMeasurement may not trigger.")
-            return False
-        if not conditions:  # Empty list
-            messagebox.showwarning("Warning", f"{side.capitalize()} conditions empty – no trigger possible.")
+            messagebox.showwarning("Invalid Conditions", "\n".join(invalid_reasons))
             return False
         return True
-
-    def apply_operator(self, temp: Optional[float], thresh: float, op: str) -> bool:
-        """Apply operator to temp vs threshold."""
-        if temp is None:
-            return False
-        if op == '>':
-            return temp > thresh
-        elif op == '<':
-            return temp < thresh
-        elif op == '>=':
-            return temp >= thresh
-        elif op == '<=':
-            return temp <= thresh
-        elif op == '=':
-            return temp == thresh
-        return False
-
-    def check_single_condition(self, temps_dict: Dict[str, Optional[float]], cond: Dict[str, any]) -> bool:
-        """Check single condition: ALL selected sensors satisfy operator."""
-        sensors = cond.get('sensors', [])
-        if not sensors:
-            return False
-        for sid in sensors:
-            temp = temps_dict.get(sid)
-            if not self.apply_operator(temp, cond['threshold'], cond['operator']):
-                return False
-        return True
-
-    def evaluate_conditions(self, temps_dict: Dict[str, Optional[float]], conditions: List[Dict[str, any]]) -> bool:
-        """Evaluate full conditions list with AND/OR logic."""
-        if not conditions:
-            return False
-        # First condition
-        result = self.check_single_condition(temps_dict, conditions[0])
-        # Subsequent with logic
-        for cond in conditions[1:]:
-            next_result = self.check_single_condition(temps_dict, cond)
-            logic = cond.get('logic', 'AND')  # Default AND
-            if logic == 'AND':
-                result = result and next_result
-            else:  # OR
-                result = result or next_result
-            if not result and logic == 'AND':  # Early exit if AND fails
-                break
-        return result
-
-    def validate_positive_int(self, value: str, field: str) -> bool:
-        """Validate that the entry is a positive integer."""
-        if not value:
-            return True
-        try:
-            val = int(value)
-            if val <= 0:
-                raise ValueError
-            if field == 'log_interval':
-                self.default_log_interval = val
-            elif field == 'view_interval':
-                self.default_view_interval = val
-            return True
-        except ValueError:
-            return False
-
-    def validate_duration(self) -> bool:
-        """Validate duration entries."""
-        try:
-            minutes = float(self.duration_minutes.get() or 0)
-            hours = float(self.duration_hours.get() or 0)
-            days = float(self.duration_days.get() or 0)
-            
-            if minutes < 0 or hours < 0 or days < 0:
-                raise ValueError("Duration values must be non-negative")
-                
-            total_seconds = (minutes * 60) + (hours * 3600) + (days * 86400)
-            self.measure_duration_sec = total_seconds if total_seconds > 0 else None
-            return True
-        except ValueError as e:
-            self.error_handler("Error", str(e))
-            return False
-
-    def validate_non_negative_float(self, value: str, field: str) -> bool:
-        """Validate that the entry is a non-negative float."""
-        if not value:
-            return True
-        try:
-            val = float(value)
-            if val < 0:
-                raise ValueError
-            return True
-        except ValueError:
-            return False
-
-    def start_logging(self):
-        """Start the logging process."""
-        if self.running_event.is_set():
-            return
-
-        self.running_event.set()
-        self.start_button.config(state="disabled")
-        self.stop_button.config(state="normal")
-        self.session_start_time = time.time()
-        self.data_processor.reset_session()
-        self.data_processor.create_session_folder()
-        
-        # Clear log treeview
-        for item in self.log_tree.get_children():
-            self.log_tree.delete(item)
-        
-        # Validate duration if enabled
-        if self.duration_enabled.get():
-            if not self.validate_duration():
-                self.stop_logging()
-                return
-        
-        # Start log timer
-        self.log_timer = self.root.after(self.default_log_interval * 1000, self.log_data)
-        
-        # Start view timer
-        self.view_timer = self.root.after(self.default_view_interval * 1000, self.update_view)
-        
-        # Start condition checking if enabled
-        measurement_started = False
-        if self.temp_start_enabled.get():
-            self.log_to_display("Waiting for start conditions...\n")
-        else:
-            measurement_started = True
-            self.measure_start_time = self.session_start_time
-
-        def check_conditions():
-            if not self.running_event.is_set():
-                return
-                
-            current_time = time.time()
-            with self.lock:
-                temps_dict = self.sensor_manager.read_sensors()
-
-            nonlocal measurement_started
-            if not measurement_started and self.temp_start_enabled.get():
-                if self.start_conditions and self.validate_temp_conditions('start'):
-                    if self.evaluate_conditions(temps_dict, self.start_conditions):
-                        measurement_started = True
-                        self.measure_start_time = current_time
-                        self.log_to_display(f"Measurement started (start conditions met)\n")
-                    else:
-                        detail = self._get_conditions_detail(temps_dict, self.start_conditions, 'start')
-                        self.log_to_display(f"Start conditions not met: {detail}\n")
-                else:
-                    self.log_to_display("Skipped start eval: invalid/empty conditions\n")
-
-            if measurement_started:
-                # Check stop conditions
-                if self.temp_stop_enabled.get() and self.stop_conditions and self.validate_temp_conditions('stop'):
-                    if self.evaluate_conditions(temps_dict, self.stop_conditions):
-                        self.log_to_display(f"Measurement stopped (stop conditions met)\n")
-                        self.stop_logging()
-                        return
-                    else:
-                        detail = self._get_conditions_detail(temps_dict, self.stop_conditions, 'stop')
-                        self.log_to_display(f"Stop conditions not met: {detail}\n")
-                # Check duration stop
-                if (self.measure_duration_sec is not None and 
-                    self.duration_enabled.get() and
-                    current_time - self.measure_start_time >= self.measure_duration_sec):
-                    self.log_to_display("Measurement stopped due to duration\n")
-                    self.stop_logging()
-                    return
-
-            # Reschedule
-            self.root.after(100, check_conditions)
-
-        # Start condition checking
-        self.root.after(100, check_conditions)
-
-    def _get_conditions_detail(self, temps_dict: Dict, conditions: List[Dict], side: str) -> str:
-        """Get detailed string for conditions evaluation."""
-        details = []
-        for i, cond in enumerate(conditions):
-            cond_result = self.check_single_condition(temps_dict, cond)
-            sensors_str = ', '.join(cond['sensors'])
-            thresh_str = f"{cond['operator']} {cond['threshold']}°C"
-            detail = f"Cond {i+1} ({sensors_str} {thresh_str}): {cond_result}"
-            details.append(detail)
-        return ' | '.join(details)
-
-    def stop_logging(self):
-        """Stop the logging process."""
-        self.running_event.clear()
-        if self.log_timer:
-            self.root.after_cancel(self.log_timer)
-            self.log_timer = None
-        if self.view_timer:
-            self.root.after_cancel(self.view_timer)
-            self.view_timer = None
-        
-        self.start_button.config(state="normal")
-        self.stop_button.config(state="disabled")
-        
-        self.data_processor.finalize_session_folder()
-        if self.generate_output_var.get():
-            self.data_processor.save_data('plot')
-        
-        self.log_to_display("Logging stopped.\n")
-
-    def log_data(self):
-        """Log data periodically."""
-        if not self.running_event.is_set():
-            return
-        
-        with self.lock:
-            temps_dict = self.sensor_manager.read_sensors()
-            elapsed = time.time() - self.measure_start_time if self.measure_start_time else 0
-            temperatures = [temps_dict.get(sid) for sid in self.sensor_manager.sensor_ids]
-            self.data_processor.data.append([self.measurement_name.get(), elapsed, datetime.now().isoformat()] + temperatures)
-            self.log_to_treeview(elapsed, temperatures)
-            self.sensor_manager.update_temperature_display(temps_dict)
-        
-        # Reschedule
-        self.log_timer = self.root.after(int(self.log_interval.get()) * 1000, self.log_data)
-
-    def update_view(self):
-        """Update view periodically."""
-        if not self.running_event.is_set():
-            return
-        # Update any real-time displays if needed
-        self.view_timer = self.root.after(int(self.view_interval.get()) * 1000, self.update_view)
-
-    def error_handler(self, title: str, message: str):
-        """Handle errors with messagebox."""
-        messagebox.showerror(title, message)
-
-    def save_data(self, format_type: str):
-        """Save data to file in the specified format."""
-        self.data_processor.save_data(format_type)
 
     def save_sensor_config(self):
         """Save sensor configuration to a JSON file."""
@@ -479,9 +274,15 @@ class TempLoggerApp:
             # Update Treeview columns
             self.gui.update_log_treeview_columns(self.sensor_manager.sensor_names)
             
-            # Repopulate GUI conditions with loaded data (call GUI method if exists)
-            self.gui.load_conditions_to_rows(self.start_conditions, 'start')
-            self.gui.load_conditions_to_rows(self.stop_conditions, 'stop')
+            # Repopulate GUI conditions with loaded data
+            try:
+                self.gui.load_conditions_to_rows(self.start_conditions, 'start')
+                self.gui.load_conditions_to_rows(self.stop_conditions, 'stop')
+            except AttributeError:
+                self.log_to_display("Warning: GUI conditions load method not available.\n")
+            
+            # Repopulate checkboxes after name changes
+            self.gui.populate_condition_checkboxes()
             
         except Exception as e:
             self.error_handler("Error", f"Loading configuration failed: {str(e)}")
@@ -491,6 +292,10 @@ class TempLoggerApp:
         start_thresh = loaded_config.get("start_threshold", 22.0)
         stop_thresh = loaded_config.get("stop_threshold", 30.0)
         all_sensors = [sid for sid in self.sensor_manager.sensor_ids]
+        
+        if not all_sensors:
+            self.log_to_display("Warning: No sensors available for legacy conversion.\n")
+            return
         
         # Default: ALL sensors > threshold for start
         self.start_conditions = [{
@@ -515,7 +320,23 @@ class TempLoggerApp:
         self.stop_logging()
         self.root.destroy()
 
+    def error_handler(self, title: str, message: str):
+        """Handle errors with messagebox."""
+        messagebox.showerror(title, message)
+
     # Új metódus a hiba javításához: Üres update_loop (opcionálisan bővíthető kezdeti frissítéssel)
     def update_loop(self):
-        """Initial update loop - placeholder for any startup refresh."""
-        pass  # Ha kell, itt pl. self.root.update() vagy kezdeti validáció
+        """Initial update loop - startup refresh."""
+        self.validate_temp_conditions('start')
+        self.validate_temp_conditions('stop')
+        self.sensor_manager.list_sensors_status()
+        # Ensure GUI is updated
+        self.root.update_idletasks()
+
+    def start_logging(self):
+        """Placeholder for start logging - implement threading."""
+        pass  # Implement as needed
+
+    def stop_logging(self):
+        """Placeholder for stop logging - finalize session."""
+        pass  # Implement as needed
