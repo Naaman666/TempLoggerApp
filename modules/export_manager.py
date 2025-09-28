@@ -3,8 +3,6 @@
 Export manager for handling file exports and overwrite protection.
 """
 
-import tkinter as tk
-from tkinter import ttk
 import tkinter.messagebox as messagebox
 from typing import Dict
 
