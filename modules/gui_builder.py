@@ -111,25 +111,32 @@ class GUIBuilder:
         ttk.Entry(control_frame, textvariable=self.app.measurement_name, width=30).grid(row=0, column=1, padx=5, pady=5, sticky='W')
         self.create_tooltip(control_frame.winfo_children()[-1], "File name for the measurement logs.")
 
-        # Log Interval
+        # Log Interval (Szélesség 5-re csökkentve, kb 999-ig fér el)
         ttk.Label(control_frame, text="Log Interval (s):").grid(row=0, column=2, padx=5, pady=5, sticky='W')
-        ttk.Entry(control_frame, textvariable=self.app.log_interval, width=10).grid(row=0, column=3, padx=5, pady=5, sticky='W')
+        ttk.Entry(control_frame, textvariable=self.app.log_interval, width=5).grid(row=0, column=3, padx=5, pady=5, sticky='W')
         self.create_tooltip(control_frame.winfo_children()[-1], "Interval for writing data to log file (seconds).")
 
-        # View Interval
+        # View Interval (Szélesség 3-ra csökkentve, kb 99-ig fér el)
         ttk.Label(control_frame, text="View Interval (s):").grid(row=0, column=4, padx=5, pady=5, sticky='W')
-        ttk.Entry(control_frame, textvariable=self.app.view_interval, width=10).grid(row=0, column=5, padx=5, pady=5, sticky='W')
-        self.create_tooltip(control_frame.winfo_children()[-1], "Interval for updating data on the screen (seconds).")
+        ttk.Entry(control_frame, textvariable=self.app.view_interval, width=3).grid(row=0, column=5, padx=5, pady=5, sticky='W')
+        self.create_tooltip(control_frame.winfo_children()[-1], "Interval for updating data on the screen (seconds). Should be >= Log Interval.")
 
-        # Output to CSV/Excel checkbox
-        ttk.Checkbutton(control_frame, text="Generate output file (CSV/Excel)", variable=self.app.generate_output_var).grid(row=0, column=6, padx=10, pady=5, sticky='W')
+        # Output Checkbox és Tooltip (Egyszerűsített felirat)
+        output_check = ttk.Checkbutton(control_frame, text="Generate output", variable=self.app.generate_output_var)
+        output_check.grid(row=0, column=6, padx=10, pady=5, sticky='W')
+        self.create_tooltip(output_check, "Generate additional output files (CSV, PDF, PNG, Excel) after logging stops. Note: The raw JSON log file is always created.")
         
+        # Open Last Measurement Button (Új gomb)
+        self.open_folder_button = ttk.Button(control_frame, text="Open Last Measurement", command=self.app.open_last_measurement_folder)
+        self.open_folder_button.grid(row=0, column=7, padx=5, pady=5, sticky='W')
+        self.create_tooltip(self.open_folder_button, "Opens the folder of the most recently finished measurement session.")
+
         # Start/Stop Buttons
         self.start_button = ttk.Button(control_frame, text="Start Logging", command=self.app.start_logging, state=tk.NORMAL)
-        self.start_button.grid(row=0, column=7, padx=5, pady=5, sticky='W')
+        self.start_button.grid(row=0, column=8, padx=5, pady=5, sticky='W')
         
         self.stop_button = ttk.Button(control_frame, text="Stop Logging", command=self.app.stop_logging, state=tk.DISABLED)
-        self.stop_button.grid(row=0, column=8, padx=5, pady=5, sticky='W')
+        self.stop_button.grid(row=0, column=9, padx=5, pady=5, sticky='W')
 
         # --- Side Panel (Container for Notebook) ---
         side_panel = ttk.Frame(main_frame, padding="5 5 5 5")
@@ -271,12 +278,6 @@ class GUIBuilder:
         for entry in self.duration_inputs:
             entry.config(state=state)
 
-    # ... _create_condition_row, _delete_condition_row, _update_condition_row, update_log_treeview_columns, 
-    #     populate_condition_checkboxes, create_tooltip, update_start_stop_buttons, load_conditions_to_rows methods...
-    # (These methods are assumed to be complete and correct based on previous context)
-    
-    # Placeholders for missing methods if they exist outside the snippet:
-
     def _create_condition_row(self, side: str):
         pass # Placeholder
 
@@ -293,16 +294,43 @@ class GUIBuilder:
         pass # Placeholder
         
     def create_tooltip(self, widget: tk.Widget, text: str):
-        pass # Placeholder
+        """Create a simple tooltip for a widget."""
+        
+        def enter(event):
+            tooltip = tk.Toplevel(widget)
+            tooltip.wm_overrideredirect(True)
+            
+            # Position the tooltip relative to the mouse cursor
+            # Use event.x_root and event.y_root for screen coordinates
+            tooltip.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 20}")
+            
+            label = tk.Label(tooltip, text=text, background="yellow", 
+                           relief="solid", borderwidth=1, padx=5, pady=3,
+                           justify=tk.LEFT)
+            label.pack()
+            self.tooltips.append(tooltip)
+            widget.tooltip_window = tooltip
+
+        def leave(event):
+            if hasattr(widget, 'tooltip_window') and widget.tooltip_window in self.tooltips:
+                widget.tooltip_window.destroy()
+                self.tooltips.remove(widget.tooltip_window)
+                del widget.tooltip_window
+                
+        widget.bind("<Enter>", enter)
+        widget.bind("<Leave>", leave)
 
     def update_start_stop_buttons(self, is_running: bool):
         """Update the state of Start/Stop buttons."""
         if is_running:
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
+            self.open_folder_button.config(state=tk.DISABLED)
         else:
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
+            # A gombot engedélyezzük, amint a mérés véget ér.
+            self.open_folder_button.config(state=tk.NORMAL)
 
     def load_conditions_to_rows(self, conditions: List[Dict[str, Any]], side: str):
         pass # Placeholder
