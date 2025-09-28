@@ -46,15 +46,15 @@ def get_default_config() -> Dict[str, Any]:
     return {
         "default_log_interval": 10,
         "default_view_interval": 3,
-        "default_start_threshold": 22.0,
+        "default_start_threshold": 25.0,
         "default_stop_threshold": 30.0,
-        "max_log_lines": 500,
-        "measurement_folder": "TestResults",
-        "config_folder": "SensorConfigs"
+        "max_log_lines": 1000,
+        "measurement_folder": "measurements",
+        "config_folder": "config"
     }
 
-def retry(max_attempts: int = 5, delay: float = 0.1):
-    """Retry decorator."""
+def retry(max_attempts: int = 3, delay: float = 1.0):
+    """Retry decorator for sensor reading functions."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -65,7 +65,7 @@ def retry(max_attempts: int = 5, delay: float = 0.1):
                     if attempt == max_attempts - 1:
                         raise
                     time.sleep(delay)
-            raise SensorNotReadyError("All retry attempts failed")  # Raise instead of return None
+            raise SensorNotReadyError("All retry attempts failed")
         return wrapper
     return decorator
 
@@ -82,7 +82,6 @@ def format_duration(seconds: float) -> str:
     secs = int(seconds % 60)
     return f"{hours:3d}h {minutes:2d}m {secs:2d}s"
 
-# New for conditions
 def sanitize_sensor_list(sensors: List[str], available_ids: List[str]) -> List[str]:
     """Sanitize and validate sensor list."""
     return [sid for sid in sensors if sid in available_ids]
@@ -95,5 +94,5 @@ def evaluate_operator(temp: Optional[float], thresh: float, op: str) -> bool:
     if op == '<': return temp < thresh
     if op == '>=': return temp >= thresh
     if op == '<=': return temp <= thresh
-    if op == '=': return abs(temp - thresh) < 0.1  # Tolerance for float eq
+    if op == '=': return temp == thresh
     return False
