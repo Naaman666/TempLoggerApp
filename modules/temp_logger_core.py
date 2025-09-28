@@ -9,10 +9,10 @@ import threading
 import time
 import os
 import json
-import re # Hozzáadva a mappanevek regex alapú kereséséhez
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
-import subprocess # Hozzáadva a mappa megnyitásához
+# Hozzáadva a glob a mappa kereséséhez
+import glob
 
 if TYPE_CHECKING:
     from .gui_builder import GUIBuilder
@@ -40,179 +40,120 @@ class TempLoggerApp:
         self.log_file = None
         self.view_timer = None
         self.log_thread: Optional[threading.Thread] = None
-        self.export_thread: Optional[threading.Thread] = None
         self.measure_start_time = None
         self.session_start_time = None
         self.data_columns = []
         self.lock = threading.Lock()
         self.loaded_config = None
         
+        # Tkinter variables
+        self.measurement_name = tk.StringVar(value="Test_Measurement")
+        self.log_interval = tk.IntVar(value=self.default_log_interval)
+        self.view_interval = tk.IntVar(value=self.default_view_interval)
+        self.generate_output_var = tk.BooleanVar(value=True)
+
+        self.duration_enabled = tk.BooleanVar(value=False)
+        self.duration_days = tk.StringVar(value="0")
+        self.duration_hours = tk.StringVar(value="0")
+        self.duration_minutes = tk.StringVar(value="0")
+        
         self.temp_start_enabled = tk.BooleanVar(value=False)
         self.temp_stop_enabled = tk.BooleanVar(value=False)
-        self.measure_duration_sec = None
-        self.duration_enabled = tk.BooleanVar(value=False)
-        self.duration_minutes = tk.StringVar(value="0")
-        self.duration_hours = tk.StringVar(value="0")
-        self.duration_days = tk.StringVar(value="0")
-        self.generate_output_var = tk.BooleanVar(value=True)
-        self.log_interval = tk.StringVar(value=str(self.default_log_interval))
-        self.view_interval = tk.StringVar(value=str(self.default_view_interval))
-        self.measurement_name = tk.StringVar(value="temptestlog")
-        
         self.start_conditions: List[Dict[str, Any]] = []
         self.stop_conditions: List[Dict[str, Any]] = []
 
-        self.initialize_components()
-        
-        # Initialize sensors after GUI is set up
-        self.root.after(100, self.initialize_sensors)
-
-    def initialize_components(self):
-        """Initialize all application components."""
-        from .gui_builder import GUIBuilder
+        # Module initialization (Import inside to avoid circular dependency issues)
         from .sensor_manager import SensorManager
         from .data_processor import DataProcessor
+        from .gui_builder import GUIBuilder
         from .export_manager import ExportManager
         
-        self.gui = GUIBuilder(self.root, self)
-        self.sensor_manager = SensorManager(self)
         self.data_processor = DataProcessor(self)
+        self.sensor_manager = SensorManager(self)
         self.export_manager = ExportManager()
-
-    def initialize_sensors(self):
-        """Initialize sensors and update GUI."""
+        self.gui = GUIBuilder(root, self)
+        
+        self.load_configuration()
         self.sensor_manager.init_sensors()
-        self.gui.update_log_treeview_columns(self.sensor_manager.sensor_names)
-        self.gui.populate_condition_checkboxes()
 
-    def log_to_display(self, message: str):
-        """Safely log message to display."""
-        def update_text():
-            try:
-                self.gui.app.log_messages.config(state=tk.NORMAL)
-                self.gui.app.log_messages.insert(tk.END, message)
-                self.gui.app.log_messages.see(tk.END)
-                self.gui.app.log_messages.config(state=tk.DISABLED)
-            except AttributeError:
-                print(message, end='') 
+    def update_loop(self):
+        """Timer for refreshing the GUI with live data."""
+        if self.running_event.is_set():
+            # Run the live data update function
+            self.data_processor.update_live_data()
+            
+            # Check for duration stop condition
+            if self.duration_enabled.get():
+                duration_seconds = self.data_processor.get_total_duration_seconds()
+                if duration_seconds is not None:
+                    elapsed = time.time() - self.measure_start_time
+                    if elapsed >= duration_seconds:
+                        self.log_to_display("STOP CONDITION: Fixed duration reached.\\n")
+                        self.stop_logging()
+                        return # Exit the loop immediately
+            
+            # Check for temperature stop condition
+            if self.temp_stop_enabled.get():
+                if self.data_processor.check_conditions(self.stop_conditions):
+                    self.log_to_display("STOP CONDITION: Temperature condition met.\\n")
+                    self.stop_logging()
+                    return # Exit the loop immediately
 
-        self.root.after(0, update_text)
 
-    def log_to_treeview(self, elapsed_seconds: float, temperatures: list):
-        """Add a row to the Treeview with formatted data."""
-        
-        def update_tree():
-            if not hasattr(self.gui.app, 'log_tree'):
-                return
-                
-            timestamp = format_duration(elapsed_seconds)
-            
-            values = [timestamp]
-            for temp in temperatures:
-                if temp is None:
-                    values.append("Inactive")
-                else:
-                    values.append(f"{temp:.1f}")
-            
-            iid = self.gui.app.log_tree.insert("", tk.END, values=values)
-            row_index = len(self.gui.app.log_tree.get_children())
-            tag = "evenrow" if row_index % 2 == 0 else "oddrow"
-            self.gui.app.log_tree.item(iid, tags=(tag,))
-            
-            self.gui.app.log_tree.see(self.gui.app.log_tree.get_children()[-1])
-            
-        self.root.after(0, update_tree)
-
-    def update_conditions_list(self, side: str):
-        """Update conditions list from GUI rows (called by GUI on change)."""
-        if side == 'start':
-            conditions = self.start_conditions
-            rows = self.gui.start_conditions_rows
-        else:
-            conditions = self.stop_conditions
-            rows = self.gui.stop_conditions_rows
-        
-        parsed_conditions = []
-        
-        for row_data in rows:
-            sensor_vars = row_data.get('sensor_vars', {})
-            selected_sensors = [sid for sid, var in sensor_vars.items() if var.get()]
-            
-            threshold_str = row_data.get('threshold_var', tk.StringVar(value="")).get()
-            operator = row_data.get('operator_var', tk.StringVar(value=">")).get()
-            logic_op = row_data.get('logic_var', tk.StringVar(value=None)).get()
-            
-            try:
-                threshold = float(threshold_str) if threshold_str else 0.0
-                if selected_sensors:
-                    cond = {
-                        'sensors': selected_sensors,
-                        'operator': operator,
-                        'threshold': threshold,
-                        'logic': logic_op if logic_op in ['AND', 'OR'] else None
-                    }
-                    parsed_conditions.append(cond)
-            except ValueError:
-                self.log_to_display(f"Warning: Invalid threshold value '{threshold_str}' encountered.\n")
-                pass
-        
-        if side == 'start':
-            self.start_conditions = parsed_conditions
-        else:
-            self.stop_conditions = parsed_conditions
-        
-        self.validate_temp_conditions(side)
-
-    def validate_temp_conditions(self, side: str) -> bool:
-        """Validate conditions list, show warning if invalid."""
-        if side == 'start':
-            conditions = self.start_conditions
-            enabled = self.temp_start_enabled.get()
-        else:
-            conditions = self.stop_conditions
-            enabled = self.temp_stop_enabled.get()
-        
-        if not enabled:
-            return True
-        
-        invalid_reasons = []
-        for i, cond in enumerate(conditions):
-            invalid_sensors = [sid for sid in cond.get('sensors', []) if sid not in self.sensor_manager.sensor_ids]
-            if invalid_sensors:
-                invalid_reasons.append(f"Condition {i+1}: Invalid sensors {invalid_sensors}")
-            if not isinstance(cond.get('threshold'), float):
-                 invalid_reasons.append(f"Condition {i+1}: Invalid threshold type {cond.get('threshold')}")
-            if cond.get('operator') not in ['>', '<', '>=', '<=', '=']:
-                invalid_reasons.append(f"Condition {i+1}: Invalid operator {cond.get('operator')}")
-            if not cond.get('sensors'):
-                invalid_reasons.append(f"Condition {i+1}: No sensors selected")
-        
-        if invalid_reasons:
-            messagebox.showwarning("Invalid Conditions", "\n".join(invalid_reasons))
-            return False
-        return True
+        # Schedule the next run
+        view_interval = self.view_interval.get()
+        if view_interval < 1: view_interval = 1 # Minimum 1 second for GUI refresh
+        self.view_timer = self.root.after(view_interval * 1000, self.update_loop)
 
     def start_logging(self):
-        """Start the logging process."""
+        """Start the measurement and logging thread."""
         if self.running_event.is_set():
-            self.log_to_display("Logging is already running.\n")
+            self.log_to_display("Logging is already running.\\n")
+            return
+        
+        # Check start conditions if enabled
+        if self.temp_start_enabled.get():
+            self.log_to_display("Waiting for START condition...\\n")
+            self.gui.update_start_stop_buttons(True) # Set to Running state
+            # A view_timer fogja futtatni az update_loop-ot, ami ellenőrzi a feltételeket
+            self.measure_start_time = time.time() # Mérés indítási idő rögzítése
+            self.log_thread = threading.Thread(target=self._wait_for_start)
+            self.log_thread.daemon = True
+            self.log_thread.start()
+        else:
+            self._start_measurement_thread()
+
+    def _wait_for_start(self):
+        """Wait loop for temperature start condition."""
+        while not self.running_event.is_set():
+            if self.data_processor.check_conditions(self.start_conditions):
+                self.root.after(0, self._start_measurement_thread)
+                return
+            
+            # Wait for 1 second before checking again
+            time.sleep(1)
+
+    def _start_measurement_thread(self):
+        """Internal method to truly start logging after conditions are met or immediately."""
+        if self.running_event.is_set():
             return
             
-        if not self.validate_temp_conditions('start') or not self.validate_temp_conditions('stop'):
-            return
-
-        self.data_processor.init_new_session(self.measurement_name.get())
-        
         try:
-            self.measure_start_time = datetime.now()
-            self.log_thread = threading.Thread(target=self._log_loop, daemon=True)
+            self.data_processor.initialize_session()
             self.running_event.set()
+            self.measure_start_time = time.time()
+            self.session_start_time = datetime.now()
+            
+            self.log_to_display(f"LOGGING STARTED at {self.session_start_time.strftime('%Y-%m-%d %H:%M:%S')}\\n")
+            
+            # Start the main logging thread
+            self.log_thread = threading.Thread(target=self.data_processor.log_data_worker)
+            self.log_thread.daemon = True
             self.log_thread.start()
             
+            # Update GUI buttons (This call also happens in start_logging, but ensures correct state)
             self.gui.update_start_stop_buttons(True)
-            self.root.after(0, self._update_gui_live)
-            
-            self.log_to_display(f"Logging started: '{self.data_processor.current_session_folder}'\n")
+            self.log_to_display(f"Measurement folder: {self.data_processor.current_session_folder}\\n")
 
         except Exception as e:
             self.error_handler("Start Error", f"Failed to start logging: {str(e)}")
@@ -220,222 +161,183 @@ class TempLoggerApp:
             self.gui.update_start_stop_buttons(False)
 
     def stop_logging(self):
-        """Stop the logging process and initiate data export."""
+        """Stop the measurement and start export process."""
         if not self.running_event.is_set():
+            if self.log_thread and self.log_thread.is_alive():
+                # Esetleg a _wait_for_start van még futásban
+                self.running_event.set() 
+                self.log_thread.join(timeout=1)
+                self.log_thread = None
+            self.log_to_display("Logging is already stopped or failed to start.\\n")
+            self.gui.update_start_stop_buttons(False)
             return
-            
+
         self.running_event.clear()
-        
-        if self.view_timer:
-            self.root.after_cancel(self.view_timer)
-            self.view_timer = None
-
-        if self.log_file:
-            self.log_file.close()
-            self.log_file = None
-            self.log_to_display("Logging stopped. Initiating data export...\n")
-
-        # Disable main GUI interaction while exporting
         self.gui.update_start_stop_buttons(False)
-        self.gui.start_button.config(state=tk.DISABLED) 
-        self.gui.stop_button.config(state=tk.DISABLED)
-        self.gui.open_folder_button.config(state=tk.DISABLED) # Mappa gomb letiltása exportálás alatt
-        
-        # Show progress bar and start export in a new thread
-        self.gui.show_export_progress()
-        
-        self.export_thread = threading.Thread(target=self._export_and_cleanup_thread, daemon=True)
-        self.export_thread.start()
+        self.log_to_display("LOGGING STOPPED. Preparing export...\\n")
 
-    def _export_and_cleanup_thread(self):
-        """
-        Worker thread to export data, handle the minimum 5-second duration, 
-        and safely call the GUI update.
-        """
-        MIN_EXPORT_TIME = 5.0 # Másodperc (felhasználói kérés minimum)
+        # Kill the logging thread first
+        if self.log_thread:
+            self.log_thread.join(timeout=5)
+            self.log_thread = None
+
+        # Start export in a separate thread to prevent GUI freeze
+        export_thread = threading.Thread(target=self._run_export_process)
+        export_thread.daemon = True
+        export_thread.start()
         
-        export_start_time = time.time()
-        
+    def _run_export_process(self):
+        """Internal method to manage export thread and GUI updates."""
         try:
-            # 1. Progress update: Export kezdete
-            self.root.after(0, lambda: self.gui.update_progress(5))
+            # 1. Show progress bar and change cursor
+            self.root.after(0, self.gui.show_export_progress)
             
-            # 2. Fő feladat: adatok exportálása és a grafikonok generálása
-            self.data_processor.export_data()
+            # 2. Finalize log file and set end time
+            self.data_processor.finalize_session()
             
-            # 3. Progress update: Export logikailag kész
-            self.root.after(0, lambda: self.gui.update_progress(90))
+            # 3. Export data if enabled
+            if self.generate_output_var.get():
+                self.root.after(0, lambda: self.gui.update_progress(10))
+                self.data_processor.export_data(self.root, self.gui.update_progress)
 
-            export_time = time.time() - export_start_time
-            time_to_wait = MIN_EXPORT_TIME - export_time
+            # 4. Hide progress bar and restore cursor
+            self.root.after(0, self.gui.hide_export_progress)
+            self.log_to_display("Export complete.\\n")
             
-            if time_to_wait > 0:
-                # Várakozás a minimum 5 másodperces progress bar idő eléréséig
-                time.sleep(time_to_wait)
+            # 5. Open folder automatically (optional)
+            # self.root.after(0, self.open_last_measurement_folder)
 
         except Exception as e:
-            self.error_handler("Export Error", f"Data export failed: {str(e)}")
-        finally:
-            # 4. Biztonságos GUI frissítés a fő szálon (bezárás, gombok engedélyezése)
-            self.root.after(0, self._finish_export_ui)
-            self.export_thread = None
-
-
-    def _finish_export_ui(self):
-        """Safely hide progress bar and re-enable GUI elements in the main thread."""
-        
-        self.gui.update_progress(100) # Progress bar teljesre állítása
-        self.gui.hide_export_progress()
-        self.gui.update_start_stop_buttons(is_running=False)
-        self.data_processor.reset_session()
-        self.log_to_display("Data export complete. GUI is now ready for a new measurement.\n")
-
-    def _find_last_measurement_folder(self):
-        """
-        Megkeresi a mérési mappák között a legmagasabb AT:x számlálóval rendelkező mappát.
-        """
-        base_dir = self.measurement_folder 
-        
-        if not os.path.isdir(base_dir):
-            return None
-            
-        folders = os.listdir(base_dir)
-        last_counter = -1
-        last_folder_name = None
-        
-        # Minta: AT:XXXX_valami_uuid
-        # A 4 jegyű számláló (XXXX) kinyerése
-        pattern = re.compile(r"AT:(\d{4})_.*") 
-        
-        for folder in folders:
-            match = pattern.match(folder)
-            if match:
-                try:
-                    counter = int(match.group(1))
-                    
-                    if counter > last_counter:
-                        last_counter = counter
-                        last_folder_name = folder
-                except ValueError:
-                    # Ez akkor fordul elő, ha a (\d{4}) nem konvertálható számmá, de a regex ezt kezeli
-                    continue
-        
-        if last_folder_name:
-            return os.path.join(base_dir, last_folder_name)
-        return None
-
+            self.root.after(0, self.gui.hide_export_progress)
+            self.error_handler("Export Error", f"Export failed: {str(e)}")
 
     def open_last_measurement_folder(self):
-        """Opens the folder of the most recently finished measurement session (highest AT:x)."""
-        # Megpróbáljuk megkeresni a legnagyobb számlálójú mappát
-        folder_path = self._find_last_measurement_folder()
-        
-        if not folder_path:
-            messagebox.showinfo("Open Folder", "No measurement session folder found.")
-            return
-
-        self.log_to_display(f"Opening folder: {folder_path}\n")
-
+        """
+        Opens the folder of the most recently finished measurement session 
+        (the one with the highest AT:x number).
+        """
+        # JAVÍTÁS: Mappa keresési logika a legmagasabb AT:x sorszám alapján
         try:
-            if os.name == 'nt':  # Windows
-                os.startfile(folder_path)
-            elif os.uname().sysname == 'Darwin':  # macOS
-                subprocess.Popen(['open', folder_path])
-            else:  # Linux (Gnome/KDE/etc.)
-                # Ha futtatod a programot RPI-n (ahol a 'pi' felhasználó fut), 
-                # a 'xdg-open' a leggyakoribb parancs.
-                subprocess.Popen(['xdg-open', folder_path])
-        except Exception as e:
-            self.error_handler("Folder Error", f"Could not open folder: {e}")
+            # Mintázat a mérésmappa nevére (pl. 231026_145000_AT:12_MyTest)
+            search_pattern = os.path.join(self.measurement_folder, '*_AT:*')
+            
+            # Megkeressük az összes mappát, ami illeszkedik a mintázatra
+            folders = glob.glob(search_pattern)
+            
+            if not folders:
+                self.log_to_display("No measurement folders found with the AT:X pattern in the measurement directory.\\n")
+                return
 
-    def _log_loop(self):
-        """Worker thread for periodic logging."""
-        log_interval_sec: float
-        try:
-            log_interval_sec = float(self.log_interval.get())
-        except ValueError:
-            log_interval_sec = self.default_log_interval
-            self.log_to_display(f"Warning: Invalid log interval. Defaulting to {log_interval_sec}s.\n")
+            # Elemzés a sorszám alapján
+            last_folder = None
+            max_counter = -1
             
-        self.measure_duration_sec = self.data_processor.get_total_duration_seconds()
-
-        while self.running_event.is_set():
-            start_time = time.time()
-            temps: Dict[str, Optional[float]] = self.sensor_manager.read_sensors()
-            current_time = datetime.now()
-            
-            if not self.session_start_time:
-                self.session_start_time = current_time
-
-            seconds_elapsed = round(current_time.timestamp() - self.session_start_time.timestamp(), 1)
-            
-            log_data: List[Any] = ["LOG", seconds_elapsed, current_time.strftime("%Y-%m-%d %H:%M:%S")]
-            
-            for sensor_id in self.sensor_manager.sensor_ids:
-                log_data.append(temps.get(sensor_id))
-            
-            self.data_processor.log_data_point(log_data)
-            
-            # A Treeview frissítése CSAK itt történik meg, amikor új adat lett logolva.
-            temperatures_for_treeview = log_data[3:] # Kihagyjuk a Type, Seconds, Timestamp mezőket
-            self.log_to_treeview(seconds_elapsed, temperatures_for_treeview)
-
-            should_stop = False
-            
-            # 1. Stop conditions check
-            if self.temp_stop_enabled.get() and self.data_processor.check_conditions(self.stop_conditions, temps):
-                self.log_to_display("Stop condition met. Stopping logging.\n")
-                should_stop = True
+            for folder_path in folders:
+                folder_name = os.path.basename(folder_path)
+                # Keresünk AT:X mintát, ahol X egy szám
+                parts = folder_name.split('_')
+                counter_part = next((part for part in parts if part.startswith('AT:')), None)
                 
-            # 2. Fixed duration check
-            if self.duration_enabled.get() and self.measure_duration_sec is not None and seconds_elapsed >= self.measure_duration_sec:
-                self.log_to_display("Fixed duration reached. Stopping logging.\n")
-                should_stop = True
+                if counter_part:
+                    try:
+                        counter = int(counter_part.split(':')[-1])
+                        if counter > max_counter:
+                            max_counter = counter
+                            last_folder = folder_path
+                    except ValueError:
+                        # Ha az AT:X rossz formátumú, kihagyjuk
+                        continue
 
-            if should_stop:
-                self.root.after(0, self.stop_logging)
-                break
+            if last_folder and os.path.isdir(last_folder):
+                os.startfile(last_folder) if os.name == 'nt' else os.system(f'xdg-open "{last_folder}"')
+                self.log_to_display(f"Opened last measurement folder: {os.path.basename(last_folder)}\\n")
+            else:
+                self.log_to_display("Could not determine the latest measurement folder.\\n")
 
-            time_taken = time.time() - start_time
-            sleep_time = log_interval_sec - time_taken
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-    def _update_gui_live(self):
-        """Update live temperature display."""
-        if not self.running_event.is_set():
-            return
+        except Exception as e:
+            self.error_handler("Folder Error", f"Failed to open last measurement folder: {str(e)}")
             
+    def log_to_display(self, message: str):
+        """Log message to the application's message box."""
+        self.root.after(0, lambda: self._update_log_messages(message))
+
+    def _update_log_messages(self, message: str):
+        """Thread-safe update of the scrolled text widget."""
+        log_widget = self.gui.app.log_messages
+        log_widget.config(state=tk.NORMAL)
+        log_widget.insert(tk.END, message)
+        
+        # Limit the number of lines
+        line_count = int(log_widget.index('end-1c').split('.')[0])
+        if line_count > self.max_log_lines:
+            log_widget.delete('1.0', f'{line_count - self.max_log_lines}.0')
+            
+        log_widget.see(tk.END)
+        log_widget.config(state=tk.DISABLED)
+
+    def load_configuration(self):
+        """Load configuration from JSON and apply settings."""
         try:
-            current_temps = self.sensor_manager.get_last_readings()
+            self.loaded_config = load_config()
             
-            # Update live temperature labels (Ez frissül a view_interval frekvenciájával)
-            for sid, label in self.sensor_manager.temp_labels.items():
-                temp = current_temps.get(sid)
-                if temp is not None:
-                    label.config(text=f"{temp:.1f} °C")
-                else:
-                    label.config(text="N/A")
+            self.measurement_name.set(self.loaded_config.get("default_name", "Test_Measurement"))
+            self.log_interval.set(self.loaded_config.get("default_log_interval", self.default_log_interval))
+            self.view_interval.set(self.loaded_config.get("default_view_interval", self.default_view_interval))
+            
+            self.duration_enabled.set(self.loaded_config.get("duration_enabled", False))
+            
+            duration_s = self.loaded_config.get("fixed_duration_seconds", 0)
+            self.duration_days.set(str(duration_s // 86400))
+            self.duration_hours.set(str((duration_s % 86400) // 3600))
+            self.duration_minutes.set(str((duration_s % 3600) // 60))
+            
+            self.temp_start_enabled.set(self.loaded_config.get("temp_start_enabled", False))
+            self.temp_stop_enabled.set(self.loaded_config.get("temp_stop_enabled", False))
+            
+            self.start_conditions = self.loaded_config.get("start_conditions", [])
+            self.stop_conditions = self.loaded_config.get("stop_conditions", [])
+
+            # Legacy threshold conversion (if conditions are empty but thresholds exist)
+            if not self.start_conditions and self.loaded_config.get("start_threshold") is not None:
+                self._convert_legacy_thresholds(self.loaded_config)
+
+            # GUI condition row creation (must be called after loading)
+            try:
+                self.gui.load_conditions_to_rows(self.start_conditions, 'start')
+                self.gui.load_conditions_to_rows(self.stop_conditions, 'stop')
+            except AttributeError:
+                self.log_to_display("Warning: GUI conditions load method not available.\\n")
+            
+            self.gui.populate_condition_checkboxes()
             
         except Exception as e:
-            self.error_handler("GUI Update Error", f"Live GUI update failed: {str(e)}")
-            
-        # Reschedule update based ONLY on view_interval (független a log_intervaltól)
-        try:
-            view_interval_sec = float(self.view_interval.get())
-        except ValueError:
-            view_interval_sec = self.default_view_interval
-            
-        self.view_timer = self.root.after(int(view_interval_sec * 1000), self._update_gui_live)
-
-    def save_config(self):
-        pass # Placeholder
-
-    def load_config(self):
-        pass # Placeholder
+            self.error_handler("Error", f"Loading configuration failed: {str(e)}")
 
     def _convert_legacy_thresholds(self, loaded_config: Dict):
-        pass # Placeholder
+        """Convert old single threshold settings to the new conditions format."""
+        all_sensors = self.sensor_manager.sensor_ids
+        start_thresh = loaded_config.get("start_threshold", 25.0)
+        stop_thresh = loaded_config.get("stop_threshold", 30.0)
+        
+        if not all_sensors:
+            self.log_to_display("No sensors found to apply legacy conditions.\\n")
+            return
+        
+        self.start_conditions = [{
+            'sensors': all_sensors,
+            'operator': '>',
+            'threshold': start_thresh,
+            'logic': None
+        }]
+        
+        self.stop_conditions = [{
+            'sensors': all_sensors,
+            'operator': '<=',
+            'threshold': stop_thresh,
+            'logic': None
+        }]
+        
+        self.log_to_display("Legacy thresholds converted to conditions.\\n")
 
     def on_closing(self):
         """Handle application shutdown."""
