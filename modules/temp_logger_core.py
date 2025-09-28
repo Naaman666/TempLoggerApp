@@ -514,3 +514,8 @@ class TempLoggerApp:
         """Handle application shutdown."""
         self.stop_logging()
         self.root.destroy()
+
+    # Új metódus a hiba javításához: Üres update_loop (opcionálisan bővíthető kezdeti frissítéssel)
+    def update_loop(self):
+        """Initial update loop - placeholder for any startup refresh."""
+        pass  # Ha kell, itt pl. self.root.update() vagy kezdeti validáció
