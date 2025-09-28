@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 import json
 import os
 import threading
+import atexit
 from datetime import datetime
 from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .temp_logger_app import TempLoggerApp
+    from .temp_logger_core import TempLoggerApp  # Adjust if needed
 
 from .helpers import get_next_counter, generate_short_uuid, sanitize_filename, format_duration
 
@@ -30,6 +31,8 @@ class DataProcessor:
         self.session_start_time = None
         self.session_end_time = None
         self.temp_session_folder = None
+        # Register cleanup
+        atexit.register(self.finalize_session_folder)
 
     def create_session_folder(self) -> str:
         """Create a temporary session folder, final name set at stop."""
@@ -51,11 +54,11 @@ class DataProcessor:
 
     def finalize_session_folder(self):
         """Rename folder with end timestamp."""
-        if not self.session_end_time:
+        if not self.session_end_time and self.session_start_time:
             self.session_end_time = datetime.now()
             
         start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S")
-        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S")
+        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_end_time else start_timestamp
         base_name = sanitize_filename(self.app.measurement_name.get())
         
         final_folder_name = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}]"
@@ -87,13 +90,14 @@ class DataProcessor:
         self.temp_session_folder = None
         with self.lock:
             self.data.clear()
+        self.app.export_manager.reset_exports()
 
     def limit_log_lines(self):
         """Limit the number of lines in the log display."""
         # Not needed for Treeview
         pass
 
-    def save_data(self, format_type: str):
+    def save_data(self, format_type: str, plot_formats: List[str] = None):
         """Save data to file in the specified format."""
         if not self.data:
             self.app.error_handler("Warning", "No data to export!")
@@ -121,10 +125,18 @@ class DataProcessor:
                     self.app.export_manager.mark_exported('json')
                     
             elif format_type == 'plot':
-                filename_png = self.get_session_filename("temp_plot", "png")
-                filename_pdf = self.get_session_filename("temp_plot", "pdf")
-                self._save_plots(filename_png, filename_pdf)
-                
+                plot_formats = plot_formats or ['png', 'pdf']
+                filename_base = self.get_session_filename("temp_plot", "")
+                for fmt in plot_formats:
+                    if fmt == 'png':
+                        filename = filename_base + 'png'
+                        self.app.export_manager.mark_exported('plot')
+                        self._save_plots(filename, None, fmt='png')
+                    elif fmt == 'pdf':
+                        filename = filename_base + 'pdf'
+                        self.app.export_manager.mark_exported('plot')
+                        self._save_plots(None, filename, fmt='pdf')
+                        
             else:
                 return
                 
@@ -161,20 +173,23 @@ class DataProcessor:
             
             worksheet.insert_chart('F2', chart)
 
-    def _save_plots(self, filename_png: str, filename_pdf: str):
-        """Save plots as PNG and PDF."""
+    def _save_plots(self, filename_png: str = None, filename_pdf: str = None, fmt: str = 'png'):
+        """Save plots as PNG and/or PDF."""
+        df = pd.DataFrame(self.data, columns=self.app.data_columns)
         plt.figure(figsize=(10, 6))
         for col in self.app.data_columns[3:]:  # Skip Type, Seconds, Timestamp
-            col_data = [row[self.app.data_columns.index(col)] for row in self.data if row[self.app.data_columns.index(col)] is not None]
-            time_data = [row[1] for row in self.data if row[self.app.data_columns.index(col)] is not None]
-            if col_data:
-                plt.plot(time_data, col_data, label=col)
+            if col in df.columns:
+                valid_data = df.dropna(subset=[col])
+                if not valid_data.empty:
+                    plt.plot(valid_data['Seconds'], valid_data[col], label=col)
         
         plt.xlabel("Seconds")
         plt.ylabel("Temperature (°C)")
         plt.title("Temperature Logs")
         plt.legend()
         plt.grid(True)
-        plt.savefig(filename_png)
-        plt.savefig(filename_pdf)
+        if filename_png:
+            plt.savefig(filename_png, format='png')
+        if filename_pdf:
+            plt.savefig(filename_pdf, format='pdf')
         plt.close()
