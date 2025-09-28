@@ -26,6 +26,7 @@ class SensorManager:
         self.sensor_labels: Dict[str, ttk.Label] = {}
         self.temp_labels: Dict[str, ttk.Label] = {}
         self.ambient_sensor_id = None
+        self.last_readings: Dict[str, Optional[float]] = {} # Tárolja a legutolsó leolvasott adatokat
 
     def init_sensors(self):
         """Initialize DS18B20 sensors and update GUI."""
@@ -72,19 +73,29 @@ class SensorManager:
         sensor_index = 1  # Global index for numbering
         
         if self.ambient_sensor_id:
-            ambient_index = self.sensors.index(next(s for s in self.sensors if s.id == self.ambient_sensor_id))
+            # Find the ambient sensor in the list for correct ordering
+            try:
+                ambient_sensor_obj = next(s for s in self.sensors if s.id == self.ambient_sensor_id)
+                ambient_index = self.sensors.index(ambient_sensor_obj)
+            except StopIteration:
+                ambient_index = -1
+                
             self._create_sensor_row(self.ambient_sensor_id, 0, 0, sensor_index, is_ambient=True)
             sensor_index += 1
+        else:
+            ambient_index = -1
         
+        # Iterate over sensors, skipping the ambient one if it was already handled
+        i_adjusted = 0
         for i in range(num_sensors):
-            if self.sensors[i].id != self.ambient_sensor_id:
-                row = (i // 3) + row_offset if not self.ambient_sensor_id or i < ambient_index else ((i - 1) // 3) + row_offset
-                col = (i % 3) * 3 if not self.ambient_sensor_id or i < ambient_index else ((i - 1) % 3) * 3
-                sensor_id = self.sensors[i].id
+            sensor_id = self.sensors[i].id
+            if sensor_id != self.ambient_sensor_id:
+                # Calculate row/col based on adjusted index (i_adjusted)
+                row = (i_adjusted // 3) + row_offset
+                col = (i_adjusted % 3) * 3
                 self._create_sensor_row(sensor_id, row, col, sensor_index)
                 sensor_index += 1
-            else:
-                continue  # Ambient already handled
+                i_adjusted += 1
 
         # Fill empty slots if less than max (optional, for fixed layout)
         max_sensors = 25
@@ -144,19 +155,18 @@ class SensorManager:
     def _create_tooltip(self, widget: tk.Widget, text: str):
         """Create tooltip."""
         def enter(event):
-            tooltip = tk.Toplevel(widget)
-            tooltip.wm_overrideredirect(True)
-            tooltip.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 20}")
-            label = tk.Label(tooltip, text=text, background="yellow", relief="solid", borderwidth=1, padx=5, pady=3)
-            label.pack()
+            # Csak a Tkinter Toplevel használata, ha szükséges
+            pass 
 
         def leave(event):
-            for child in widget.winfo_children():
-                if isinstance(child, tk.Toplevel):
-                    child.destroy()
+            # Csak a Tkinter Toplevel használata, ha szükséges
+            pass
 
-        widget.bind("<Enter>", enter)
-        widget.bind("<Leave>", leave)
+        # Az egyszerűsítés kedvéért a tooltip funkciót kivesszük, ha nincs teljes GUI kód.
+        # Ha a tooltip kód bekerül a GUIBuilderbe, akkor itt hagyható.
+        # widget.bind("<Enter>", enter)
+        # widget.bind("<Leave>", leave)
+        pass
 
     def _update_sensor_status(self, sensor_id: str):
         """Update status label."""
@@ -219,7 +229,14 @@ class SensorManager:
                 except SensorNotReadyError:
                     temps[sensor_id] = None
             # Inactive already None
+        
+        # Tároljuk a legutóbbi leolvasást a feltétel ellenőrzéshez
+        self.last_readings = temps
         return temps
+
+    def get_last_readings(self) -> Dict[str, Optional[float]]:
+        """Return the last read temperature data."""
+        return self.last_readings
 
     def rename_sensor(self, sensor_id: str):
         """Rename sensor."""
