@@ -9,7 +9,7 @@ import json
 import uuid
 import os
 import time
-from typing import Dict, Any, List, Optional  # Javítás: Optional hozzáadva
+from typing import Dict, Any, List, Optional
 from w1thermsensor import SensorNotReadyError
 from functools import wraps
 
@@ -65,7 +65,7 @@ def retry(max_attempts: int = 5, delay: float = 0.1):
                     if attempt == max_attempts - 1:
                         raise
                     time.sleep(delay)
-            return None
+            raise SensorNotReadyError("All retry attempts failed")  # Raise instead of return None
         return wrapper
     return decorator
 
