@@ -100,24 +100,31 @@ class GUIBuilder:
         self.duration_days_entry = ttk.Entry(duration_frame, textvariable=self.app.duration_days, width=5)
         self.duration_days_entry.grid(row=0, column=6, padx=5, pady=2, sticky='W')
 
-        # TEMPERATURE-CONTROLLED MEASUREMENT frame (placeholder - complex implementation needed)
+        # TEMPERATURE-CONTROLLED MEASUREMENT frame
         temp_control_frame = ttk.LabelFrame(main_frame, text="Temperature-Controlled Measurement", padding=5)
         temp_control_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(temp_control_frame, text="Feature coming soon...").grid(row=0, column=0, padx=5, pady=10)
+        self.app.temp_control_enabled = tk.BooleanVar(value=False)
+        temp_control_check = ttk.Checkbutton(temp_control_frame, text="Enable temperature-based start/stop", 
+                                           variable=self.app.temp_control_enabled)
+        temp_control_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
 
-        # Sensors frame
-        sensors_frame = ttk.LabelFrame(main_frame, text="Sensors", padding=5)
-        sensors_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(temp_control_frame, text="Start threshold (°C):").grid(row=0, column=1, padx=5, pady=2, sticky='W')
+        self.app.start_threshold = tk.StringVar(value=str(self.app.default_start_threshold))
+        self.start_threshold_entry = ttk.Entry(temp_control_frame, textvariable=self.app.start_threshold, width=8)
+        self.start_threshold_entry.grid(row=0, column=2, padx=5, pady=2, sticky='W')
+        self.create_tooltip(self.start_threshold_entry, "Temperature above which measurement starts (if enabled).")
 
-        # All sensors on/off button
-        self.all_sensors_button = ttk.Button(sensors_frame, text="All Sensors On/Off", 
-                                           command=self.app.toggle_all_sensors)
-        self.all_sensors_button.grid(row=0, column=0, padx=5, pady=5, sticky='W')
+        ttk.Label(temp_control_frame, text="Stop threshold (°C):").grid(row=0, column=3, padx=5, pady=2, sticky='W')
+        self.app.stop_threshold = tk.StringVar(value=str(self.app.default_stop_threshold))
+        self.stop_threshold_entry = ttk.Entry(temp_control_frame, textvariable=self.app.stop_threshold, width=8)
+        self.stop_threshold_entry.grid(row=0, column=4, padx=5, pady=2, sticky='W')
+        self.create_tooltip(self.stop_threshold_entry, "Temperature below which measurement stops (if enabled). Must be > start threshold.")
 
-        # Sensor selection frame
-        self.app.sensor_frame = ttk.Frame(sensors_frame)
-        self.app.sensor_frame.grid(row=1, column=0, columnspan=10, padx=5, pady=5, sticky='W')
+        # Sensor selection frame (assuming it's added elsewhere or after)
+        sensor_frame = ttk.LabelFrame(main_frame, text="Sensor Selection", padding=5)
+        sensor_frame.pack(fill=tk.X, pady=5)
+        self.app.sensor_frame = sensor_frame  # Reference for sensor_manager
 
         # Log display with Treeview
         log_frame = ttk.LabelFrame(main_frame, text="Log Display", padding=5)
