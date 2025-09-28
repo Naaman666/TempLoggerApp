@@ -5,7 +5,7 @@ GUI builder for Temperature Logger application.
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, Any, List
 
 if TYPE_CHECKING:
     from .temp_logger_core import TempLoggerApp
