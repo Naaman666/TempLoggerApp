@@ -242,7 +242,10 @@ class TempLoggerApp:
         """View update loop for screen refresh."""
         
         if self.running_event.is_set():
-            self.sensor_manager.read_and_update_display() 
+            # Use the existing read_sensors and update_temperature_display to implement the logic
+            # This is a functional equivalent to the missing read_and_update_display
+            temps = self.sensor_manager.read_sensors()
+            self.sensor_manager.update_temperature_display(temps) 
             
             try:
                 view_interval_sec = float(self.view_interval.get())
@@ -285,22 +288,24 @@ class TempLoggerApp:
             self.view_timer = None
         
         if self.log_thread and self.log_thread.is_alive():
-            timeout = float(self.log_interval.get()) * 2 if self.log_interval.get() else 5.0
+            # Kis türelmi idő a leállásnak, a hibaüzenet elkerülése érdekében
+            timeout = float(self.log_interval.get()) * 3 if self.log_interval.get() else 5.0 
             self.log_thread.join(timeout=timeout)
             if self.log_thread.is_alive():
                 self.log_to_display("Warning: Log thread failed to stop gracefully.\n")
             self.log_thread = None
 
         if self.generate_output_var.get():
-            self.export_manager.export_data(
-                self.data_processor.current_session_folder, 
-                self.data_columns, 
-                self.data_processor.get_all_logged_data()
-            )
-            self.log_to_display("Data exported to CSV/Excel.\n")
+            # Az exportálás logikája a DataProcessor osztályba került
+            self.data_processor.save_data('excel')
+            self.data_processor.save_data('csv')
+            self.data_processor.save_data('json')
+            self.data_processor.save_data('plot')
+            self.log_to_display("Data exported to files.\n")
             
         self.data_processor.finalize_session_folder()
         self.data_processor.reset_session_times()
+        self.data_processor.reset_session_data() # Adatok törlése az exportálás után
         self.gui.update_start_stop_buttons(False)
         self.log_to_display("Logging stopped. Data saved.\n")
         self.export_manager.reset_exports()
