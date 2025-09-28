@@ -11,6 +11,7 @@ import os
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
+import subprocess # Hozzáadva a mappa megnyitásához
 
 if TYPE_CHECKING:
     from .gui_builder import GUIBuilder
@@ -38,7 +39,7 @@ class TempLoggerApp:
         self.log_file = None
         self.view_timer = None
         self.log_thread: Optional[threading.Thread] = None
-        self.export_thread: Optional[threading.Thread] = None # ÚJ: Az exportálási szál kezeléséhez
+        self.export_thread: Optional[threading.Thread] = None
         self.measure_start_time = None
         self.session_start_time = None
         self.data_columns = []
@@ -237,6 +238,7 @@ class TempLoggerApp:
         self.gui.update_start_stop_buttons(False)
         self.gui.start_button.config(state=tk.DISABLED) 
         self.gui.stop_button.config(state=tk.DISABLED)
+        self.gui.open_folder_button.config(state=tk.DISABLED) # Mappa gomb letiltása exportálás alatt
         
         # Show progress bar and start export in a new thread
         self.gui.show_export_progress()
@@ -287,6 +289,26 @@ class TempLoggerApp:
         self.data_processor.reset_session()
         self.log_to_display("Data export complete. GUI is now ready for a new measurement.\n")
 
+    def open_last_measurement_folder(self):
+        """Opens the folder of the most recently finished measurement session."""
+        folder_path = self.data_processor.current_session_folder
+        
+        if not folder_path or not os.path.isdir(folder_path):
+            messagebox.showinfo("Open Folder", "No measurement session has been completed yet or folder not found.")
+            return
+
+        self.log_to_display(f"Opening folder: {folder_path}\n")
+
+        try:
+            if os.name == 'nt':  # Windows
+                os.startfile(folder_path)
+            elif os.uname().sysname == 'Darwin':  # macOS
+                subprocess.Popen(['open', folder_path])
+            else:  # Linux (Gnome/KDE/etc.)
+                subprocess.Popen(['xdg-open', folder_path])
+        except Exception as e:
+            self.error_handler("Folder Error", f"Could not open folder: {e}")
+
     def _log_loop(self):
         """Worker thread for periodic logging."""
         log_interval_sec: float
@@ -314,6 +336,10 @@ class TempLoggerApp:
                 log_data.append(temps.get(sensor_id))
             
             self.data_processor.log_data_point(log_data)
+            
+            # JAVÍTÁS: A Treeview frissítése CSAK itt történik meg, amikor új adat lett logolva.
+            temperatures_for_treeview = log_data[3:] # Kihagyjuk a Type, Seconds, Timestamp mezőket
+            self.log_to_treeview(seconds_elapsed, temperatures_for_treeview)
 
             should_stop = False
             
@@ -337,32 +363,27 @@ class TempLoggerApp:
                 time.sleep(sleep_time)
 
     def _update_gui_live(self):
-        """Update live temperature display and treeview."""
+        """Update live temperature display."""
         if not self.running_event.is_set():
             return
             
         try:
             current_temps = self.sensor_manager.get_last_readings()
             
-            # Update live temperature labels
+            # Update live temperature labels (Ez frissül a view_interval frekvenciájával)
             for sid, label in self.sensor_manager.temp_labels.items():
                 temp = current_temps.get(sid)
                 if temp is not None:
                     label.config(text=f"{temp:.1f} °C")
                 else:
                     label.config(text="N/A")
-                    
-            # Update treeview (using the latest logged data, which might be slightly newer than the latest read)
-            if self.data_processor.data:
-                latest_data = self.data_processor.data[-1]
-                seconds_elapsed = latest_data[1]
-                temperatures = latest_data[3:] # Skip Type, Seconds, Timestamp
-                self.log_to_treeview(seconds_elapsed, temperatures)
-        
+            
+            # FONTOS: A Treeview frissítése innentől a _log_loop-ban történik!
+
         except Exception as e:
             self.error_handler("GUI Update Error", f"Live GUI update failed: {str(e)}")
             
-        # Reschedule update
+        # Reschedule update based ONLY on view_interval (független a log_intervaltól)
         try:
             view_interval_sec = float(self.view_interval.get())
         except ValueError:
@@ -371,7 +392,6 @@ class TempLoggerApp:
         self.view_timer = self.root.after(int(view_interval_sec * 1000), self._update_gui_live)
 
     # ... save_config, load_config, _convert_legacy_thresholds, on_closing, error_handler methods...
-    # (These methods are assumed to be complete and correct based on previous context)
 
     def save_config(self):
         pass # Placeholder
