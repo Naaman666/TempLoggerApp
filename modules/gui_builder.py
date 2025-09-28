@@ -7,7 +7,6 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import TYPE_CHECKING, Dict, Any, List, Optional
 
-# Type Hinting for better development experience (avoiding circular imports at runtime)
 if TYPE_CHECKING:
     from .temp_logger_core import TempLoggerApp
 
@@ -17,11 +16,11 @@ class GUIBuilder:
     def __init__(self, root: tk.Tk, app: 'TempLoggerApp'):
         self.root = root
         self.app = app
-        self.tooltips = []  # For managing tooltips to prevent leaks
+        self.tooltips = []
         self.start_conditions_rows: List[Dict[str, Any]] = []
         self.stop_conditions_rows: List[Dict[str, Any]] = []
         self.center_window()
-        # Clean up any existing widgets before building the new GUI
+        
         for widget in self.root.winfo_children():
             widget.destroy()
         self.init_gui()
@@ -29,7 +28,6 @@ class GUIBuilder:
     def center_window(self):
         """Center the window on the screen."""
         self.root.update_idletasks()
-        # Set a reasonable default size for a complex app
         width, height = 1400, 800
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
@@ -40,18 +38,16 @@ class GUIBuilder:
         self.root.title("Temperature Logger")
         self.root.protocol("WM_DELETE_WINDOW", self.app.on_closing)
         
-        # Configure grid for the main window
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        # Main frame
         main_frame = ttk.Frame(self.root, padding="10 10 10 10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_columnconfigure(1, weight=3)
-        main_frame.grid_rowconfigure(1, weight=1) # Log/Sensor Frame
+        main_frame.grid_rowconfigure(1, weight=1)
         
-        # --- Top Control Frame (Stays outside the tabs for easy access) ---
+        # --- Top Control Frame ---
         control_frame = ttk.Frame(main_frame, padding="5 5 5 5")
         control_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E))
         
@@ -83,7 +79,7 @@ class GUIBuilder:
         # --- Side Panel (Container for Notebook) ---
         side_panel = ttk.Frame(main_frame, padding="5 5 5 5")
         side_panel.grid(row=1, column=0, sticky=(tk.N, tk.S, tk.W, tk.E))
-        side_panel.grid_rowconfigure(0, weight=1) # Notebook takes priority
+        side_panel.grid_rowconfigure(0, weight=1)
         side_panel.grid_columnconfigure(0, weight=1)
 
         # --- Settings Notebook ---
@@ -95,12 +91,12 @@ class GUIBuilder:
         self.settings_notebook.add(main_tab, text='Main')
         main_tab.grid_columnconfigure(0, weight=1)
         
-        # Sensor Status Frame (Placeholder for sensor_manager to populate)
+        # Sensor Status Frame
         self.app.sensor_frame = ttk.LabelFrame(main_tab, text="Sensor Status and Selection", padding="5 5 5 5")
         self.app.sensor_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         self.app.sensor_frame.grid_columnconfigure(0, weight=1)
 
-        # Measurement Duration Frame (Fixed Duration stays on Main for easy access)
+        # Measurement Duration Frame (Fixed Duration)
         duration_frame = ttk.LabelFrame(main_tab, text="Fixed Duration", padding=5)
         duration_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
         
@@ -116,7 +112,7 @@ class GUIBuilder:
         ttk.Entry(duration_frame, textvariable=self.app.duration_minutes, width=5).grid(row=1, column=5, padx=5, pady=2, sticky='W')
         
         self.duration_inputs = duration_frame.winfo_children()[2:]
-        self._toggle_duration_input() # Initial state setting
+        self._toggle_duration_input()
 
         # --- TAB 2: Duration/Conditions (Temperature-Controlled) ---
         conditions_tab = ttk.Frame(self.settings_notebook, padding="5")
@@ -127,8 +123,8 @@ class GUIBuilder:
         # TEMPERATURE-CONTROLLED MEASUREMENT frame
         temp_control_frame = ttk.LabelFrame(conditions_tab, text="Temperature-Controlled Measurement", padding=5)
         temp_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
-        temp_control_frame.grid_rowconfigure(0, weight=1) # Start conditions
-        temp_control_frame.grid_rowconfigure(1, weight=1) # Stop conditions
+        temp_control_frame.grid_rowconfigure(0, weight=1)
+        temp_control_frame.grid_rowconfigure(1, weight=1)
         temp_control_frame.grid_columnconfigure(0, weight=1)
 
         # --- START CONDITIONS BLOCK ---
@@ -145,7 +141,6 @@ class GUIBuilder:
         self.start_enable_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
         self.create_tooltip(self.start_enable_check, "Enable automatic start based on temperature conditions.")
 
-        # Add row button for start
         ttk.Button(header_start, text="Add Start Condition", command=lambda: self._create_condition_row('start')).grid(row=0, column=1, padx=5, pady=2)
         
         self.start_conditions_container = ttk.Frame(start_block)
@@ -166,7 +161,6 @@ class GUIBuilder:
         self.stop_enable_check.grid(row=0, column=0, padx=5, pady=2, sticky='W')
         self.create_tooltip(self.stop_enable_check, "Enable automatic stop based on temperature conditions.")
 
-        # Add row button for stop
         ttk.Button(header_stop, text="Add Stop Condition", command=lambda: self._create_condition_row('stop')).grid(row=0, column=1, padx=5, pady=2)
         
         self.stop_conditions_container = ttk.Frame(stop_block)
@@ -220,11 +214,10 @@ class GUIBuilder:
     def _create_condition_row(self, side: str):
         """Create a new condition row (start or stop)."""
         
-        # Determine container and list
         if side == 'start':
             container = self.start_conditions_container
             condition_list = self.start_conditions_rows
-        else: # side == 'stop'
+        else:
             container = self.stop_conditions_container
             condition_list = self.stop_conditions_rows
         
@@ -240,7 +233,6 @@ class GUIBuilder:
             'logic_var': tk.StringVar(value='AND')
         }
         
-        # 1. LOGIC (AND/OR) for subsequent rows
         if condition_list:
             logic_options = ['AND', 'OR']
             logic_menu = ttk.OptionMenu(row_frame, row_data['logic_var'], 'AND', *logic_options, 
@@ -248,75 +240,58 @@ class GUIBuilder:
             logic_menu.grid(row=0, column=0, padx=5, pady=2, sticky='W')
             row_data['logic_menu'] = logic_menu
         else:
-            # First row doesn't need logic, add a placeholder label
             ttk.Label(row_frame, text="First:").grid(row=0, column=0, padx=5, pady=2, sticky='W')
-            row_data['logic_var'].set(None) # Set to None for the core logic
+            row_data['logic_var'].set(None)
             
         col_index = 1
         
-        # 2. OPERATOR
         operator_options = ['>', '<', '>=', '<=']
         ttk.OptionMenu(row_frame, row_data['operator_var'], row_data['operator_var'].get(), *operator_options,
                        command=lambda x: self.app.update_conditions_list(side)).grid(row=0, column=col_index, padx=5, pady=2)
         col_index += 1
         
-        # 3. THRESHOLD
-        # NOTE: Store the Entry widget for trace binding. The original code was not binding correctly.
         threshold_entry = ttk.Entry(row_frame, textvariable=row_data['threshold_var'], width=7)
         threshold_entry.grid(row=0, column=col_index, padx=5, pady=2)
-        row_data['threshold_entry'] = threshold_entry # Store the widget
+        row_data['threshold_entry'] = threshold_entry
         row_data['threshold_var'].trace_add('write', lambda *args: self.app.update_conditions_list(side))
         col_index += 1
         
         ttk.Label(row_frame, text="°C on:").grid(row=0, column=col_index, padx=5, pady=2, sticky='W')
         col_index += 1
         
-        # 4. SENSOR SELECTION (Placeholder, populated by populate_condition_checkboxes)
         sensor_frame = ttk.Frame(row_frame)
         sensor_frame.grid(row=0, column=col_index, padx=5, pady=2, sticky='W')
         row_data['sensor_frame'] = sensor_frame
         col_index += 1
         
-        # 5. REMOVE BUTTON
         remove_button = ttk.Button(row_frame, text="X", width=2, command=lambda: self._remove_condition_row(row_data))
         remove_button.grid(row=0, column=col_index, padx=5, pady=2)
         
-        # Add to list
         condition_list.append(row_data)
         self.app.update_conditions_list(side)
         
-        # Populate sensors if available
         self.populate_condition_checkboxes(row_data)
 
     def _remove_condition_row(self, row_data: Dict[str, Any]):
         """Remove a condition row and update the core logic."""
         
-        # Destroy the frame
         row_data['frame'].destroy()
         
-        # Remove from the list
         side = row_data['side']
         if side == 'start':
             self.start_conditions_rows.remove(row_data)
+            condition_list = self.start_conditions_rows
         else:
             self.stop_conditions_rows.remove(row_data)
+            condition_list = self.stop_conditions_rows
             
-        # If the first row was deleted, update the logic of the new first row (remove logic dropdown)
-        if (side == 'start' and self.start_conditions_rows and 'logic_menu' in self.start_conditions_rows[0]):
-            first_row = self.start_conditions_rows[0]
+        if condition_list and 'logic_menu' in condition_list[0]:
+            first_row = condition_list[0]
             first_row['logic_menu'].destroy()
             ttk.Label(first_row['frame'], text="First:").grid(row=0, column=0, padx=5, pady=2, sticky='W')
             first_row['logic_var'].set(None)
-            first_row.pop('logic_menu') # Clean up dict
+            first_row.pop('logic_menu')
             
-        elif (side == 'stop' and self.stop_conditions_rows and 'logic_menu' in self.stop_conditions_rows[0]):
-            first_row = self.stop_conditions_rows[0]
-            first_row['logic_menu'].destroy()
-            ttk.Label(first_row['frame'], text="First:").grid(row=0, column=0, padx=5, pady=2, sticky='W')
-            first_row['logic_var'].set(None)
-            first_row.pop('logic_menu') # Clean up dict
-            
-        # Update core logic
         self.app.update_conditions_list(side)
 
 
@@ -327,11 +302,9 @@ class GUIBuilder:
         """
         
         def create_checkboxes(data: Dict[str, Any]):
-            # Clear previous checkboxes
             for widget in data['sensor_frame'].winfo_children():
                 widget.destroy()
             
-            # Create a checkbox for each sensor
             for sensor_id, sensor_name in self.app.sensor_manager.sensor_names.items():
                 var = data['sensor_vars'].setdefault(sensor_id, tk.BooleanVar(value=True))
                 
@@ -339,13 +312,11 @@ class GUIBuilder:
                                         command=lambda d=data: (self.app.update_conditions_list(d['side']), self.update_selected_count(d)))
                 check.pack(side=tk.LEFT, padx=3)
             
-            # Initial count update for the frame border
             self.update_selected_count(data)
             
         if row_data:
             create_checkboxes(row_data)
         else:
-            # Populate all existing rows (used at sensor initialization)
             for data in self.start_conditions_rows:
                 create_checkboxes(data)
             for data in self.stop_conditions_rows:
@@ -361,27 +332,22 @@ class GUIBuilder:
             self.create_tooltip(frame, "Warning: Select at least 1 sensor!")
         else:
             frame.config(relief='flat', borderwidth=0)
-            # A Tooltip explicit törlése eltávolítva a kód egyszerűsítése érdekében.
             pass
 
     def update_log_treeview_columns(self, sensor_names: Dict[str, str]):
         """Update the Treeview columns based on discovered sensor names."""
         
-        # Clear existing columns, except the hidden #0 column
         current_columns = self.app.log_tree["columns"]
         for col in current_columns:
             self.app.log_tree.heading(col, text="")
             self.app.log_tree.column(col, width=0)
 
-        # Set new columns
         columns = ["timestamp"] + list(sensor_names.values())
         self.app.log_tree["columns"] = columns
 
-        # Configure timestamp column
         self.app.log_tree.column("timestamp", width=120, anchor=tk.CENTER)
         self.app.log_tree.heading("timestamp", text="Timestamp")
 
-        # Configure sensor columns
         for name in sensor_names.values():
             col_width = 80 if "Ambient" in name else 70
             self.app.log_tree.column(name, width=col_width, anchor=tk.CENTER)
@@ -391,28 +357,24 @@ class GUIBuilder:
         """Create a simple tooltip for a widget."""
         
         def enter(event):
-            # Create a Toplevel window for the tooltip
             tooltip = tk.Toplevel(widget)
-            tooltip.wm_overrideredirect(True) # Removes window decorations
+            tooltip.wm_overrideredirect(True)
             
-            # Position the tooltip slightly offset from the cursor
             tooltip.wm_geometry(f"+{event.x_root + 20}+{event.y_root + 20}")
             
             label = tk.Label(tooltip, text=text, background="yellow", 
                            relief="solid", borderwidth=1, padx=5, pady=3,
                            justify=tk.LEFT)
             label.pack()
-            self.tooltips.append(tooltip) # Track the tooltip
-            widget.tooltip_window = tooltip # Store reference on the widget
+            self.tooltips.append(tooltip)
+            widget.tooltip_window = tooltip
 
         def leave(event):
-            # Destroy the specific tooltip when mouse leaves
             if hasattr(widget, 'tooltip_window') and widget.tooltip_window in self.tooltips:
                 widget.tooltip_window.destroy()
                 self.tooltips.remove(widget.tooltip_window)
                 del widget.tooltip_window
                 
-        # Bind events
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
@@ -425,17 +387,6 @@ class GUIBuilder:
             self.start_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.DISABLED)
 
-    # NOTE: load_conditions_to_rows metódust hozzá kell adni, ha a Load gombot is meg akarja tartani
-    # Ez a metódus a temp_logger_core.py load_sensor_config metódusából hiányzik, 
-    # hogy betöltse az elmentett feltételeket a GUI sorokba. 
-    # Bár a kérés nem érintette, a load_sensor_config futásához szükség van rá.
-    # Megjegyzés: Mivel a kérés nem foglalkozott a Load/Save funkcióval, 
-    # csak a hiányzó metódus helyőrzőjét hagyom meg a hibák elkerülése érdekében:
     def load_conditions_to_rows(self, conditions: List[Dict[str, Any]], side: str):
-        """Utility to load saved conditions back into GUI rows (Placeholder)."""
-        # Mivel ennek a kódnak a teljes implementálása sok kódbevitelt igényelne, 
-        # amely nem közvetlenül kapcsolódik a fő kéréshez, csak a hiányzó hívást 
-        # kommentáljuk ki a temp_logger_core.py fájlban, hogy elkerüljük az AttributeError-t.
-        # Ha a jövőben szükség lesz rá, akkor itt implementálható az összes sor törlése, 
-        # majd az új sorok létrehozása (_create_condition_row hívásával).
+        """Utility to load saved conditions back into GUI rows."""
         pass
