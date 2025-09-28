@@ -9,7 +9,7 @@ import json
 import uuid
 import os
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional  # Javítás: Optional hozzáadva
 from w1thermsensor import SensorNotReadyError
 from functools import wraps
 
