@@ -69,7 +69,8 @@ class GUIBuilder:
         self.progress_bar.pack(fill='x')
         self.progress_bar['maximum'] = 100 # Percentage based
 
-        self.root.config(cursor="wait")
+        # JAVÍTÁS: "wait" kurzor helyett "watch" használata a jobb kompatibilitásért
+        self.root.config(cursor="watch") 
         self.root.update()
 
     def update_progress(self, value: int):
@@ -85,7 +86,7 @@ class GUIBuilder:
             self.progress_window.destroy()
             self.progress_window = None
             self.progress_bar = None
-            self.root.config(cursor="")
+            self.root.config(cursor="") # Visszaállítjuk a normál kurzorra
             self.root.update()
 
     def init_gui(self):
@@ -133,7 +134,7 @@ class GUIBuilder:
         self.stop_button = ttk.Button(control_frame, text="Stop Logging", command=self.app.stop_logging, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=9, padx=5, pady=5, sticky='W')
         
-        # Open Last Measurement Button (Új pozíció a Stop gomb után)
+        # Open Last Measurement Button (Pozíció a Stop gomb után maradt)
         self.open_folder_button = ttk.Button(control_frame, text="Open Last Measurement", command=self.app.open_last_measurement_folder)
         self.open_folder_button.grid(row=0, column=10, padx=5, pady=5, sticky='W')
         self.create_tooltip(self.open_folder_button, "Opens the folder of the most recently finished measurement session (highest AT:x number).")
