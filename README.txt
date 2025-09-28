@@ -19,3 +19,17 @@ TempLoggerApp/
 │   ├── helpers.py
 │   └── temp_logger_core.py
 └── testresults/
+
+TempLoggerApp/
+├── modules/
+│   ├── __init__.py
+│   ├── temp_logger_core.py
+│   ├── sensor_manager.py
+│   ├── gui_builder.py
+│   ├── data_processor.py
+│   ├── export_manager.py
+│   ├── helpers.py
+├── config/
+│   ├── config.json
+│   ├── counter.json
+├── TempLoggerApp.py
