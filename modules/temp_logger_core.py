@@ -61,6 +61,7 @@ class TempLoggerApp:
 
         self.initialize_components()
         
+        # Initialize sensors after GUI is set up
         self.root.after(100, self.initialize_sensors)
 
     def initialize_components(self):
@@ -260,7 +261,7 @@ class TempLoggerApp:
             return
 
         self.session_start_time = datetime.now()
-        self.data_processor.create_session_folder(self.measurement_name.get())
+        self.data_processor.create_session_folder()
         
         self.data_columns = ["Type", "Seconds", "Timestamp"] + [self.sensor_manager.sensor_names[sid] for sid in self.sensor_manager.sensor_ids]
 
@@ -299,6 +300,7 @@ class TempLoggerApp:
             self.log_to_display("Data exported to CSV/Excel.\n")
             
         self.data_processor.finalize_session_folder()
+        self.data_processor.reset_session_times()
         self.gui.update_start_stop_buttons(False)
         self.log_to_display("Logging stopped. Data saved.\n")
         self.export_manager.reset_exports()
