@@ -62,6 +62,7 @@ class DataProcessor:
     def check_conditions(self, conditions: List[Dict[str, Any]]) -> bool:
         """Check if any condition group is met based on the last reading."""
         
+        # A sensor_manager-től kérjük le a legutóbbi adatokat
         last_temps = self.app.sensor_manager.get_last_readings()
         
         if not conditions:
@@ -159,10 +160,18 @@ class DataProcessor:
     def get_session_filename(self, base_name: str, extension: str) -> str:
         """Generate filename for current session."""
         if not self.current_session_folder:
-            self.create_session_folder()
+            # Ha a mérés megállt, de valamiért a mappa még nem volt finalizálva, akkor újrapróbáljuk
+            self.finalize_session_folder() 
+            if not self.current_session_folder:
+                 # Ha még mindig nincs mappa (pl. a mérés túl rövid volt), létrehozunk egy újat
+                 self.create_session_folder() 
         
-        start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S")
-        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_end_time else start_timestamp
+        # A finalize_session_folder állítja be az end_timestamp-et
+        if not self.session_end_time:
+            self.session_end_time = datetime.now()
+            
+        start_timestamp = self.session_start_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_start_time else "NODATE"
+        end_timestamp = self.session_end_time.strftime("%Y-%m-%d|%H:%M:%S") if self.session_end_time else "NODATE"
         
         base_name = sanitize_filename(base_name)
         filename = f"{base_name}-[AT:{self.session_counter}]-[START:{start_timestamp}]-[END:{end_timestamp}]-[UUID:{self.session_uuid}].{extension}"
@@ -201,18 +210,20 @@ class DataProcessor:
                     self.app.export_manager.mark_exported('json')
                     
             elif format_type == 'plot':
-                plot_formats = plot_formats or ['png', 'pdf']
-                filename_base = self.get_session_filename("temp_plot", "")
-                for fmt in plot_formats:
-                    if fmt == 'png':
-                        filename = filename_base + 'png'
-                        self.app.export_manager.mark_exported('plot')
-                        self._save_plots(filename, None, fmt='png')
-                    elif fmt == 'pdf':
-                        filename = filename_base + 'pdf'
-                        self.app.export_manager.mark_exported('plot')
-                        self._save_plots(None, filename, fmt='pdf')
-                        
+                if self.app.export_manager.check_overwrite('plot'):
+                    plot_formats = plot_formats or ['png', 'pdf']
+                    filename_base = self.get_session_filename("temp_plot", "")
+                    for fmt in plot_formats:
+                        if fmt == 'png':
+                            filename = filename_base.replace('.','') + '.png' # Levesszük a felesleges pontokat
+                            self._save_plots(filename, None, fmt='png')
+                            self.app.log_to_display(f"Plot exported to {filename}\n")
+                        elif fmt == 'pdf':
+                            filename = filename_base.replace('.','') + '.pdf' # Levesszük a felesleges pontokat
+                            self._save_plots(None, filename, fmt='pdf')
+                            self.app.log_to_display(f"Plot exported to {filename}\n")
+                    self.app.export_manager.mark_exported('plot')
+                    
             else:
                 return
                 
@@ -254,6 +265,8 @@ class DataProcessor:
         df = pd.DataFrame(self.data, columns=self.app.data_columns)
         plt.figure(figsize=(10, 6))
         for col in self.app.data_columns[3:]:  # Skip Type, Seconds, Timestamp
+            # Az oszlop adatait megpróbáljuk float-ra konvertálni, a None/Inactive értékeket kihagyva
+            df[col] = pd.to_numeric(df[col], errors='coerce') 
             if col in df.columns:
                 valid_data = df.dropna(subset=[col])
                 if not valid_data.empty:
