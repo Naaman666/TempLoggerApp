@@ -15,7 +15,8 @@ class ExportManager:
         self.exported_formats: Dict[str, bool] = {
             'excel': False, 
             'csv': False, 
-            'json': False
+            'json': False,
+            'plot': False
         }
 
     def check_overwrite(self, format_type: str) -> bool:
